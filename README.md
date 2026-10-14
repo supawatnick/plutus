@@ -4,7 +4,7 @@ Internal company asset inventory and IT-operated checkout/check-in system.
 
 ## Confirmed product rules
 - Asset form: asset name, serial number (optional), status, location. IDs assigned automatically as AST-000001 etc.
-- Serial present: individually tracked asset (quantity=1). No serial: quantity-based stock item with quantity input and separate stock ID.
+- Serial present: individually tracked asset (quantity=1). No serial: quantity-based stock item with quantity input. Both kinds use the AST ID sequence.
 - Statuses: Available, Borrowed, Demo Lab, Retired. Only Available inventory can be checked out.
 - Each serialized unit has an independent loan; each quantity-based checkout has an independent loan with quantity and partial-return balance.
 - Checkout records borrower name/email; customer name, customer site and project are required free text; expected return date optional.
@@ -23,6 +23,14 @@ Internal company asset inventory and IT-operated checkout/check-in system.
 
 ## Proposed stack
 React + TypeScript + Vite + Tailwind CSS + TanStack Query/Table + React Hook Form + Zod; Node.js 24 + Express + TypeScript + Prisma + PostgreSQL; Argon2id + server sessions + secure cookies; Docker Compose + Caddy + cloudflared; Vitest + Playwright.
+
+## Current implementation (2026-10-15)
+- Frontend: React 19 + Vite + TypeScript, responsive CSS (no Tailwind yet), accessible form workflows and mobile navigation.
+- Backend: Express 5 + TypeScript + node-postgres (`pg`) with explicit transaction locks, Argon2id local login, server-side session cookies and three RBAC roles. `prisma/schema.prisma` is a prior design draft, not used by the runtime.
+- PostgreSQL 16 installed on Plutus; initial migration applied to local database; isolated `plutus_test` database used for API integration testing.
+- Shipped UI flows: login, dashboard summary, inventory create/list/edit/location/status search, soft delete, checkout/return and CSV exports. Editing serialized identifiers and changing borrowed status through asset edit are not complete.
+- Verified locally: TypeScript/production build, browser Playwright Desktop/Mobile tests with mocked API, and transactional API integration tests against real PostgreSQL.
+- **Not deployed for users yet:** no configured production credentials/first admin/domain, production reverse proxy or LINE API credentials. XLSX import, notification worker, backups, and LINE integration are planned but not complete.
 
 ## Implementation order
 1. Architecture, schema, and API contracts with clear invariants.

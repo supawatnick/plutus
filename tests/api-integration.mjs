@@ -25,6 +25,7 @@ try{
  const login=await call('POST','/auth/login',{username:'api-test-manager',password:'integration-fixture-only'});assert.equal(login.status,200);const cookie=login.cookie;assert(cookie);
  const create=await call('POST','/inventory',{name:'Switch Stock',serial:null,location:'IT Storage',status:'Available',quantity:3},cookie);assert.equal(create.status,201);const id=create.data.item.id;
  const serialized=await call('POST','/inventory',{name:'Laptop',serial:'unique-serial-test-001',location:'IT Storage',status:'Available'},cookie);assert.equal(serialized.status,201);
+ const exportResponse=await fetch(base+'/exports/inventory.csv',{headers:{cookie}});assert.equal(exportResponse.status,200);assert((await exportResponse.text()).includes('Switch Stock'));
  const duplicate=await call('POST','/inventory',{name:'Laptop 2',serial:'unique-serial-test-001',location:'IT Storage',status:'Available'},cookie);assert.equal(duplicate.status,409);
  const payload={inventoryId:id,borrowerName:'Test Borrower',borrowerEmail:'test@example.invalid',customerName:'Test Company',customerSite:'Test Site',projectName:'Project 1',quantity:2};
  const [one,two]=await Promise.all([call('POST','/loans',payload,cookie),call('POST','/loans',{...payload,quantity:2},cookie)]);

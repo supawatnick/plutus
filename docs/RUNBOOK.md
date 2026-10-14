@@ -1,0 +1,22 @@
+# Plutus local deployment runbook (not yet deployed)
+
+Requirements: Node.js 24, PostgreSQL 16+ database, HTTPS reverse proxy before exposing outside the machine.
+Run from the repository root:
+1. `npm ci`
+2. Set `DATABASE_URL` in a private server environment, keep it out of Git.
+3. `node scripts/migrate.mjs`
+4. Set `BOOTSTRAP_ADMIN_USERNAME` and a random 16+ character `BOOTSTRAP_ADMIN_PASSWORD` securely.
+5. `node scripts/bootstrap-admin.mjs` (run **once**); immediately unset bootstrap credentials.
+6. For local **HTTP only**, set `COOKIE_SECURE=false`; production must use `COOKIE_SECURE=true` behind HTTPS.
+7. `npm run build`, then start backend with `node apps/api/dist/server.js`.
+8. Serve `apps/web/dist` through an HTTPS reverse proxy that forwards `/api` to 127.0.0.1:3001.
+9. Check `/api/v1/health` and test signed-in Inventory and Checkout/Return flows with a separate test database.
+
+Do **not** expose the API directly to the Internet or use a default password. No public sign-up endpoint.
+`PUBLIC_ORIGIN` is the preferred external application URL; enable `TRUST_PROXY=true` only when behind a controlled reverse proxy.
+
+### Current restrictions
+- PostgreSQL and Docker have not been provisioned on Plutus by this stage.
+- Automated web E2E exercises mocked API responses; end-to-end transactions with real PostgreSQL still require live integration testing.
+- External Cloudflare domain, LINE credentials and SMTP configuration are not yet supplied.
+- A quantity-stock design review is required before production: a partially borrowed quantity item can keep Available units while status shows Borrowed.

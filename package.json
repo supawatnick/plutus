@@ -9,7 +9,10 @@
   "scripts": {
     "dev": "npm run dev --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test:e2e": "playwright test",
+    "test:api": "node tests/api-integration.mjs",
+    "db:migrate": "node scripts/migrate.mjs"
   },
   "engines": {
     "node": ">=24"

@@ -3,6 +3,9 @@ import express from 'express';
 import helmet from 'helmet';
 import { Pool, PoolClient } from 'pg';
 import argon2 from 'argon2';
+import multer from 'multer';
+import ExcelJS from 'exceljs';
+import {parse as csvParse} from 'csv-parse/sync';
 import { randomBytes, createHash, randomUUID } from 'node:crypto';
 import { z, ZodError } from 'zod';
 
@@ -13,6 +16,7 @@ const pool=new Pool({connectionString:config.DATABASE_URL,max:8});
 const app=express();
 if(config.TRUST_PROXY==='true') app.set('trust proxy',1);
 app.disable('x-powered-by');app.use(helmet());app.use(express.json({limit:'128kb'}));
+const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:2*1024*1024,files:1}});
 type Role='ADMIN'|'ASSET_MANAGER'|'VIEWER';
 type Principal={id:string;username:string;role:Role};
 declare global {namespace Express {interface Request {principal?:Principal; sessionToken?:string}}}
@@ -48,8 +52,19 @@ app.get('/api/v1/inventory',session,asyncRoute(async(req,res)=>{const q=z.object
  const count=await pool.query('SELECT count(*)::int AS n FROM inventory '+clause,params);params.push(q.limit,q.offset);
  const rows=await pool.query('SELECT id,display_id AS "displayId",name,serial,kind,status,location,total_qty AS "totalQuantity",available_qty AS "availableQuantity" FROM inventory '+clause+` ORDER BY created_at DESC LIMIT $${params.length-1} OFFSET $${params.length}`,params);res.json({items:rows.rows,total:count.rows[0].n});}));
 app.post('/api/v1/inventory',session,allow('ADMIN','ASSET_MANAGER'),csrf,asyncRoute(async(req,res)=>{const v=assetInput.parse(req.body);if(v.status==='Borrowed')return error(400,'INVALID_STATUS','Use checkout to mark asset borrowed');const serial=v.serial||null;const kind=serial?'SERIALIZED':'QUANTITY';const quantity=kind==='SERIALIZED'?1:(v.quantity??1);const result=await tx(async c=>{const id=randomUUID();const displayId=await nextId(c,'asset');const row=await c.query('INSERT INTO inventory(id,display_id,name,serial,kind,status,location,total_qty,available_qty) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',[id,displayId,v.name,serial,kind,v.status,v.location,quantity,v.status==='Available'?quantity:0]);await audit(c,req.principal!.id,'CREATE','INVENTORY',id,null,row.rows[0]);return row.rows[0];});res.status(201).json({item:result});}));
-app.patch('/api/v1/inventory/:id',session,allow('ADMIN','ASSET_MANAGER'),csrf,asyncRoute(async(req,res)=>{const input=assetInput.partial().parse(req.body);const item=await tx(async c=>{const r=await c.query('SELECT * FROM inventory WHERE id=$1 AND deleted_at IS NULL FOR UPDATE',[req.params.id]);if(!r.rows.length)return error(404,'NOT_FOUND','Asset not found');const previous=r.rows[0];const outstanding=await c.query('SELECT coalesce(sum(quantity-returned_qty),0)::int AS qty FROM loans WHERE inventory_id=$1 AND closed_at IS NULL',[previous.id]);if(outstanding.rows[0].qty>0&&('status' in input||'serial' in input||'quantity' in input))return error(409,'OPEN_LOAN','Close open loans first; status and stock quantities cannot be changed directly');if(input.serial!==undefined&&((input.serial||null)!==previous.serial))return error(409,'SERIAL_CHANGE_BLOCKED','Serial changes require a managed migration');if(input.quantity!==undefined&&input.quantity!==previous.total_qty)return error(409,'QUANTITY_CHANGE_BLOCKED','Quantity adjustments need their own audited workflow');if(input.status==='Borrowed')return error(400,'INVALID_STATUS','Use checkout');
- const nextStatus=input.status??previous.status;const available=nextStatus==='Available'?previous.total_qty:0;const row=await c.query('UPDATE inventory SET name=$2,status=$3,location=$4,available_qty=$5,updated_at=now() WHERE id=$1 RETURNING *',[previous.id,input.name??previous.name,nextStatus,input.location??previous.location,available]);await audit(c,req.principal!.id,'UPDATE','INVENTORY',previous.id,previous,row.rows[0]);return row.rows[0];});res.json({item});}));
+app.patch('/api/v1/inventory/:id',session,allow('ADMIN','ASSET_MANAGER'),csrf,asyncRoute(async(req,res)=>{const input=assetInput.partial().parse(req.body);const item=await tx(async c=>{const r=await c.query('SELECT * FROM inventory WHERE id=$1 AND deleted_at IS NULL FOR UPDATE',[req.params.id]);if(!r.rows.length)return error(404,'NOT_FOUND','Asset not found');const previous=r.rows[0];const outstanding=await c.query('SELECT coalesce(sum(quantity-returned_qty),0)::int AS qty FROM loans WHERE inventory_id=$1 AND closed_at IS NULL',[previous.id]);const outstandingQty=outstanding.rows[0].qty as number;
+ if(outstandingQty>0&&('serial' in input||'quantity' in input))return error(409,'OPEN_LOAN','Serial and quantity cannot change during an open loan');
+ if(outstandingQty>0&&input.status&&input.status!==previous.status){
+  if(previous.kind!=='SERIALIZED')return error(409,'QUANTITY_LOANS_ACTIVE','Return quantity-based loans individually');
+  if(!input.location?.trim())return error(400,'LOCATION_REQUIRED','A new location is required to close a loan');
+  if(req.body.confirmCloseLoan!==true)return error(409,'CONFIRM_CLOSE_LOAN','Confirm closing the outstanding loan');
+  const open=await c.query('SELECT * FROM loans WHERE inventory_id=$1 AND closed_at IS NULL FOR UPDATE',[previous.id]);
+  if(open.rows.length!==1)return error(409,'INVALID_OPEN_LOANS','Expected one serialized open loan');
+  const loan=open.rows[0];await c.query('INSERT INTO returns(id,loan_id,qty,new_location,resulting_status,received_by) VALUES($1,$2,1,$3,$4,$5)',[randomUUID(),loan.id,input.location,input.status,req.principal!.id]);
+  const closed=await c.query('UPDATE loans SET returned_qty=1,closed_at=now() WHERE id=$1 RETURNING *',[loan.id]);
+  await audit(c,req.principal!.id,'RETURN','LOAN',loan.id,loan,closed.rows[0]);
+ }if(input.serial!==undefined&&((input.serial||null)!==previous.serial))return error(409,'SERIAL_CHANGE_BLOCKED','Serial changes require a managed migration');if(input.quantity!==undefined&&input.quantity!==previous.total_qty)return error(409,'QUANTITY_CHANGE_BLOCKED','Quantity adjustments need their own audited workflow');if(input.status==='Borrowed')return error(400,'INVALID_STATUS','Use checkout');
+ const nextStatus=input.status??previous.status;const available=outstandingQty>0&&nextStatus===previous.status?previous.available_qty:nextStatus==='Available'?previous.total_qty:0;const row=await c.query('UPDATE inventory SET name=$2,status=$3,location=$4,available_qty=$5,updated_at=now() WHERE id=$1 RETURNING *',[previous.id,input.name??previous.name,nextStatus,input.location??previous.location,available]);await audit(c,req.principal!.id,'UPDATE','INVENTORY',previous.id,previous,row.rows[0]);return row.rows[0];});res.json({item});}));
 app.delete('/api/v1/inventory/:id',session,allow('ADMIN','ASSET_MANAGER'),csrf,asyncRoute(async(req,res)=>{await tx(async c=>{const r=await c.query('SELECT * FROM inventory WHERE id=$1 AND deleted_at IS NULL FOR UPDATE',[req.params.id]);if(!r.rows.length)return error(404,'NOT_FOUND','Asset not found');const outstanding=await c.query('SELECT 1 FROM loans WHERE inventory_id=$1 AND closed_at IS NULL LIMIT 1',[req.params.id]);if(outstanding.rowCount)return error(409,'OPEN_LOAN','Asset has an open loan');await c.query('UPDATE inventory SET deleted_at=now() WHERE id=$1',[req.params.id]);await audit(c,req.principal!.id,'DELETE','INVENTORY',String(req.params.id),r.rows[0],{deleted:true});});res.json({ok:true});}));
 app.post('/api/v1/inventory/:id/restore',session,allow('ADMIN','ASSET_MANAGER'),csrf,asyncRoute(async(req,res)=>{await tx(async c=>{const r=await c.query('UPDATE inventory SET deleted_at=NULL,updated_at=now() WHERE id=$1 AND deleted_at IS NOT NULL RETURNING *',[req.params.id]);if(!r.rowCount)return error(404,'NOT_FOUND','Asset not deleted');await audit(c,req.principal!.id,'RESTORE','INVENTORY',String(req.params.id),null,r.rows[0]);});res.json({ok:true});}));
 app.get('/api/v1/loans',session,asyncRoute(async(req,res)=>{const r=await pool.query('SELECT l.*,i.display_id AS "assetId",i.name AS "assetName" FROM loans l JOIN inventory i ON i.id=l.inventory_id ORDER BY l.borrowed_at DESC LIMIT 200');res.json({items:r.rows});}));
@@ -64,6 +79,55 @@ app.post('/api/v1/users',session,allow('ADMIN'),csrf,asyncRoute(async(req,res)=>
 app.patch('/api/v1/users/:id',session,allow('ADMIN'),csrf,asyncRoute(async(req,res)=>{const v=z.object({role:z.enum(['ADMIN','ASSET_MANAGER','VIEWER']).optional(),active:z.boolean().optional(),password:z.string().min(16).max(200).optional()}).refine(x=>Object.keys(x).length>0).parse(req.body);const updated=await tx(async c=>{await c.query('SELECT pg_advisory_xact_lock(1984001)');const before=await c.query('SELECT id,username,role,active FROM app_users WHERE id=$1 FOR UPDATE',[req.params.id]);if(!before.rows.length)return error(404,'NOT_FOUND','User not found');const prior=before.rows[0];if(prior.role==='ADMIN'&&prior.active&&(v.role&&v.role!=='ADMIN'||v.active===false)){const count=await c.query("SELECT count(*)::int AS n FROM app_users WHERE role='ADMIN' AND active=true");if(count.rows[0].n<=1)return error(409,'LAST_ADMIN','Cannot disable or demote the last active administrator');}
  const pwd=v.password?await argon2.hash(v.password,{type:argon2.argon2id,memoryCost:65536,timeCost:3,parallelism:1}):null;const result=await c.query('UPDATE app_users SET role=$2,active=$3,password_hash=coalesce($4,password_hash) WHERE id=$1 RETURNING id,username,role,active',[prior.id,v.role??prior.role,v.active??prior.active,pwd]);if(v.active===false||v.password||v.role&&v.role!==prior.role)await c.query('DELETE FROM sessions WHERE user_id=$1',[prior.id]);await audit(c,req.principal!.id,'UPDATE_USER','USER',prior.id,prior,{...result.rows[0],passwordChanged:Boolean(v.password)});return result.rows[0];});res.json({user:updated});}));
 app.get('/api/v1/dashboard',session,asyncRoute(async(req,res)=>{const r=await pool.query("SELECT count(*)::int AS total,coalesce(sum(available_qty),0)::int AS available,coalesce(sum(total_qty-available_qty),0)::int AS unavailable,coalesce(sum(CASE WHEN status='Demo Lab' THEN total_qty ELSE 0 END),0)::int AS demo_lab,coalesce(sum(CASE WHEN status='Retired' THEN total_qty ELSE 0 END),0)::int AS retired FROM inventory WHERE deleted_at IS NULL");const overdue=await pool.query('SELECT count(*)::int AS total FROM loans WHERE closed_at IS NULL AND expected_return_at<now()');res.json({totals:r.rows[0],overdue:overdue.rows[0].total});}));
+
+type ImportItem={name:string;serial:string|null;location:string;status:'Available'|'Demo Lab'|'Retired';quantity:number;row:number};
+async function parseInventoryFile(file:Express.Multer.File|undefined):Promise<{rows:ImportItem[];errors:string[]}>{
+ if(!file)throw new ApiError(400,'FILE_REQUIRED','Upload an XLSX or CSV file');
+ const suffix=file.originalname.toLowerCase().split('.').pop();
+ let records:Record<string,unknown>[];
+ if(suffix==='csv'){
+  records=csvParse(file.buffer,{columns:true,skip_empty_lines:true,bom:true,trim:true,relax_quotes:false}) as Record<string,unknown>[];
+ }else if(suffix==='xlsx'){
+  const book=new ExcelJS.Workbook();await book.xlsx.load(file.buffer as unknown as ExcelJS.Buffer);
+  const sheet=book.worksheets[0];if(!sheet)throw new ApiError(400,'EMPTY_WORKBOOK','No worksheet found');
+  const headers=(sheet.getRow(1).values as unknown[]).slice(1).map(v=>String(v??'').trim());
+  records=[];sheet.eachRow((row,num)=>{if(num!==1){const obj:Record<string,unknown>={};headers.forEach((h,i)=>obj[h]=row.getCell(i+1).text);records.push(obj);}});
+ }else throw new ApiError(400,'FILE_TYPE','Only CSV and XLSX supported');
+ if(records.length>1000)throw new ApiError(400,'TOO_MANY_ROWS','Maximum 1,000 rows per import');
+ const rows:ImportItem[]=[],errors:string[]=[];
+ records.forEach((raw,index)=>{
+  const obj=Object.fromEntries(Object.entries(raw).map(([k,v])=>[k.toLowerCase().replace(/[^a-z0-9]/g,''),String(v??'').trim()]));
+  const name=obj.assetname||obj.name||'',serial=obj.serialnumber||obj.serial||null,location=obj.location||'',status=obj.status||'Available';
+  const quantity=Number(obj.quantity||1);
+  if(!name||!location||name.length>300||location.length>300||serial&&serial.length>200||!['Available','Demo Lab','Retired'].includes(status)||!Number.isSafeInteger(quantity)||quantity<1||quantity>1000000){
+   errors.push('Row '+(index+2)+': invalid name, serial, location, status or quantity');return;
+  }
+  rows.push({name,serial,location,status:status as ImportItem['status'],quantity:serial?1:quantity,row:index+2});
+ });
+ return {rows,errors};
+}
+const importHandler=(commit:boolean):express.RequestHandler=>asyncRoute(async(req,res)=>{
+ const parsed=await parseInventoryFile(req.file);
+ const serials=parsed.rows.filter(r=>r.serial).map(r=>r.serial!);
+ const existing=serials.length?(await pool.query('SELECT serial FROM inventory WHERE serial=ANY($1::text[])',[serials])).rows.map(x=>x.serial as string):[];
+ const known=new Set<string>(existing);const newRows:ImportItem[]=[],skipped:{row:number;reason:string}[]=[];
+ for(const row of parsed.rows){if(row.serial&&known.has(row.serial)){skipped.push({row:row.row,reason:'Duplicate serial number'});continue;}if(row.serial)known.add(row.serial);newRows.push(row);}
+ if(!commit)return res.json({total:parsed.rows.length+parsed.errors.length,ready:newRows.length,skipped,errors:parsed.errors,preview:newRows.slice(0,30)});
+ if(parsed.errors.length)return res.status(422).json({code:'IMPORT_INVALID',message:'Correct invalid rows before importing',errors:parsed.errors});
+ const result=await tx(async c=>{let inserted=0;const skippedAtCommit=[...skipped];
+ for(const row of newRows){
+  if(row.serial){const exists=await c.query('SELECT 1 FROM inventory WHERE serial=$1',[row.serial]);if(exists.rowCount){skippedAtCommit.push({row:row.row,reason:'Already imported'});continue;}}
+  const id=randomUUID(),display=await nextId(c,'asset'),kind=row.serial?'SERIALIZED':'QUANTITY';
+  const output=await c.query('INSERT INTO inventory(id,display_id,name,serial,kind,status,location,total_qty,available_qty) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (serial) DO NOTHING RETURNING *',[id,display,row.name,row.serial,kind,row.status,row.location,row.quantity,row.status==='Available'?row.quantity:0]);
+  if(!output.rowCount){skippedAtCommit.push({row:row.row,reason:'Serial already exists'});continue;}
+  inserted++;await audit(c,req.principal!.id,'IMPORT_CREATE','INVENTORY',id,null,output.rows[0]);
+ }
+ return {imported:inserted,skipped:skippedAtCommit};
+ });return res.json(result);
+});
+app.post('/api/v1/imports/inventory/preview',session,allow('ADMIN','ASSET_MANAGER'),csrf,upload.single('file'),importHandler(false));
+app.post('/api/v1/imports/inventory/commit',session,allow('ADMIN','ASSET_MANAGER'),csrf,upload.single('file'),importHandler(true));
+
 const csvCell=(value:unknown)=>{const raw=String(value??'');const guarded=/^[=+@-]/.test(raw)?"'"+raw:raw;return '"'+guarded.replace(/"/g,'""')+'"';};
 const csv=(headers:string[],rows:unknown[][])=>'\ufeff'+[headers,...rows.map(r=>r.map(String))].map(r=>r.map(csvCell).join(',')).join('\r\n')+'\r\n';
 app.get('/api/v1/exports/inventory.csv',session,asyncRoute(async(_req,res)=>{const r=await pool.query('SELECT display_id,name,serial,kind,status,location,total_qty,available_qty FROM inventory WHERE deleted_at IS NULL ORDER BY display_id');const rows=r.rows.map(a=>[a.display_id,a.name,a.serial??'',a.kind,a.status,a.location,a.total_qty,a.available_qty]);res.set('Content-Type','text/csv; charset=utf-8');res.set('Content-Disposition','attachment; filename="plutus-inventory.csv"');res.send(csv(['Asset ID','Asset Name','Serial Number','Kind','Status','Location','Total Quantity','Available Quantity'],rows));}));

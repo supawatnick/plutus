@@ -26,6 +26,11 @@ try{
  const create=await call('POST','/inventory',{name:'Switch Stock',serial:null,location:'IT Storage',status:'Available',quantity:3},cookie);assert.equal(create.status,201);const id=create.data.item.id;
  const serialized=await call('POST','/inventory',{name:'Laptop',serial:'unique-serial-test-001',location:'IT Storage',status:'Available'},cookie);assert.equal(serialized.status,201);
  const exportResponse=await fetch(base+'/exports/inventory.csv',{headers:{cookie}});assert.equal(exportResponse.status,200);assert((await exportResponse.text()).includes('Switch Stock'));
+ const sampleCsv='Asset Name,Serial Number,Location,Status,Quantity\nImport Switch,IMPORT-001,IT Shelf,Available,1\nImport Duplicate,IMPORT-001,IT Shelf,Available,1\n';
+ const makeImport=()=>{const f=new FormData();f.append('file',new Blob([sampleCsv],{type:'text/csv'}),'inventory.csv');return f;};
+ const previewImport=await fetch(base+'/imports/inventory/preview',{method:'POST',headers:{cookie},body:makeImport()});assert.equal(previewImport.status,200);const previewBody=await previewImport.json();assert.equal(previewBody.ready,1);assert.equal(previewBody.skipped.length,1);
+ const commitImport=await fetch(base+'/imports/inventory/commit',{method:'POST',headers:{cookie},body:makeImport()});assert.equal(commitImport.status,200);const commitBody=await commitImport.json();assert.equal(commitBody.imported,1);
+ const retryImport=await fetch(base+'/imports/inventory/commit',{method:'POST',headers:{cookie},body:makeImport()});assert.equal(retryImport.status,200);assert.equal((await retryImport.json()).imported,0);
  const duplicate=await call('POST','/inventory',{name:'Laptop 2',serial:'unique-serial-test-001',location:'IT Storage',status:'Available'},cookie);assert.equal(duplicate.status,409);
  const payload={inventoryId:id,borrowerName:'Test Borrower',borrowerEmail:'test@example.invalid',customerName:'Test Company',customerSite:'Test Site',projectName:'Project 1',quantity:2};
  const [one,two]=await Promise.all([call('POST','/loans',payload,cookie),call('POST','/loans',{...payload,quantity:2},cookie)]);
@@ -35,6 +40,11 @@ try{
  const over=await call('POST','/loans',{...payload,quantity:1},cookie);assert.equal(over.status,409);
  const part=await call('POST','/loans/'+loan.id+'/returns',{quantity:1,newLocation:'Returned Shelf',resultingStatus:'Available'},cookie);assert.equal(part.status,200);assert.equal(part.data.loan.returned_qty,1);
  const finish=await call('POST','/loans/'+loan.id+'/returns',{quantity:1,newLocation:'Returned Shelf',resultingStatus:'Available'},cookie);assert.equal(finish.status,200);assert(finish.data.loan.closed_at);
+ const serializedLoan=await call('POST','/loans',{...payload,inventoryId:serialized.data.item.id,quantity:1},cookie);assert.equal(serializedLoan.status,201);
+ const noLocation=await call('PATCH','/inventory/'+serialized.data.item.id,{status:'Demo Lab'},cookie);assert.equal(noLocation.status,400);
+ const noConfirm=await call('PATCH','/inventory/'+serialized.data.item.id,{status:'Demo Lab',location:'Demo Lab'},cookie);assert.equal(noConfirm.status,409);
+ const closeViaStatus=await call('PATCH','/inventory/'+serialized.data.item.id,{status:'Demo Lab',location:'Demo Lab',confirmCloseLoan:true},cookie);assert.equal(closeViaStatus.status,200);
+ const closedRow=await pool.query('SELECT closed_at,returned_qty FROM loans WHERE id=$1',[serializedLoan.data.loan.id]);assert(closedRow.rows[0].closed_at);assert.equal(closedRow.rows[0].returned_qty,1);
  const viewer=await call('POST','/auth/login',{username:'api-test-viewer',password:'integration-fixture-only'});assert.equal(viewer.status,200);const denied=await call('POST','/inventory',{name:'Blocked',location:'X'},viewer.cookie);assert.equal(denied.status,403);
  const audit=await pool.query('SELECT action FROM audit_events');assert(audit.rows.some(x=>x.action==='BORROW'));assert(audit.rows.some(x=>x.action==='RETURN'));
  console.log('PASS real PostgreSQL integration: auth, role restrictions, unique serial, concurrent stock checkout, partial return, audit');

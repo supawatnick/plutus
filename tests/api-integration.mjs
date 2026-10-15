@@ -23,6 +23,9 @@ try{
  assert(ready,'API did not start');
  const unauth=await call('GET','/inventory');assert.equal(unauth.status,401);
  const login=await call('POST','/auth/login',{username:'api-test-manager',password:'integration-fixture-only'});assert.equal(login.status,200);const cookie=login.cookie;assert(cookie);
+ const csrfCrossSite=await fetch(base+'/inventory',{method:'POST',headers:{cookie,origin:'https://attacker.example','content-type':'application/json'},body:JSON.stringify({name:'Blocked CSRF',location:'X'})});assert.equal(csrfCrossSite.status,403);
+ const csrfFetchSite=await fetch(base+'/inventory',{method:'POST',headers:{cookie,'sec-fetch-site':'cross-site','content-type':'application/json'},body:JSON.stringify({name:'Blocked Fetch Site',location:'X'})});assert.equal(csrfFetchSite.status,403);
+ const csrfMalformed=await fetch(base+'/inventory',{method:'POST',headers:{cookie,origin:'null','content-type':'application/json'},body:JSON.stringify({name:'Blocked Null Origin',location:'X'})});assert.equal(csrfMalformed.status,403);
  const linkCode=await call('POST','/integrations/line/link-code',{},cookie);assert.equal(linkCode.status,200);assert.equal(linkCode.data.code.length,16);
  const invalidWebhook=await fetch(base+'/integrations/line/webhook',{method:'POST',headers:{'content-type':'application/json','x-line-signature':'invalid'},body:'{"events":[]}'});assert.equal(invalidWebhook.status,401);
  const create=await call('POST','/inventory',{name:'Switch Stock',serial:null,location:'IT Storage',status:'Available',quantity:3},cookie);assert.equal(create.status,201);const id=create.data.item.id;
@@ -41,8 +44,11 @@ try{
  const loan=(one.status===201?one:two).data.loan;
  const other=await call('POST','/loans',{...payload,quantity:1,expectedReturnAt:new Date(Date.now()+24*60*60*1000).toISOString()},cookie);assert.equal(other.status,201);
  const over=await call('POST','/loans',{...payload,quantity:1},cookie);assert.equal(over.status,409);
+ const prohibitedStatus=await call('PATCH','/inventory/'+id,{status:'Retired',location:'Retired Shelf'},cookie);assert.equal(prohibitedStatus.status,409);
  const part=await call('POST','/loans/'+loan.id+'/returns',{quantity:1,newLocation:'Returned Shelf',resultingStatus:'Available'},cookie);assert.equal(part.status,200);assert.equal(part.data.loan.returned_qty,1);
  const finish=await call('POST','/loans/'+loan.id+'/returns',{quantity:1,newLocation:'Returned Shelf',resultingStatus:'Available'},cookie);assert.equal(finish.status,200);assert(finish.data.loan.closed_at);
+ const openUnrelated=await pool.query('SELECT quantity,returned_qty,closed_at FROM loans WHERE id=$1',[other.data.loan.id]);assert.equal(openUnrelated.rows[0].returned_qty,0);assert.equal(openUnrelated.rows[0].closed_at,null);
+ const inventoryAfterReturns=await pool.query('SELECT status,available_qty,total_qty FROM inventory WHERE id=$1',[id]);assert.equal(inventoryAfterReturns.rows[0].status,'Borrowed');assert.equal(inventoryAfterReturns.rows[0].available_qty,2);assert.equal(inventoryAfterReturns.rows[0].total_qty,3);
  const serializedLoan=await call('POST','/loans',{...payload,inventoryId:serialized.data.item.id,quantity:1},cookie);assert.equal(serializedLoan.status,201);
  const noLocation=await call('PATCH','/inventory/'+serialized.data.item.id,{status:'Demo Lab'},cookie);assert.equal(noLocation.status,400);
  const noConfirm=await call('PATCH','/inventory/'+serialized.data.item.id,{status:'Demo Lab',location:'Demo Lab'},cookie);assert.equal(noConfirm.status,409);

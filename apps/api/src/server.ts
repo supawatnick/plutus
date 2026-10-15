@@ -98,8 +98,20 @@ const session=asyncRoute(async(req,res,next)=>{const cookie=req.headers.cookie?.
  const r=await pool.query('SELECT u.id,u.username,u.role FROM sessions s JOIN app_users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now() AND u.active=true',[hash(cookie)]);
  if(!r.rows.length)return error(401,'UNAUTHORIZED','Session expired');req.principal=r.rows[0];req.sessionToken=cookie;next();});
 const allow=(...roles:Role[]):express.RequestHandler=>(req,_res,next)=>req.principal&&roles.includes(req.principal.role)?next():next(new ApiError(403,'FORBIDDEN','Insufficient role'));
-const csrf:express.RequestHandler=(req,_res,next)=>{const origin=req.headers.origin;const host=req.headers.host;const allowed=process.env.PUBLIC_ORIGIN;
- if(origin&&origin!==allowed&&new URL(origin).host!==host)return next(new ApiError(403,'ORIGIN_BLOCKED','Cross-origin requests blocked'));next();};
+const csrf:express.RequestHandler=(req,_res,next)=>{
+ const origin=req.headers.origin;
+ const site=req.header('sec-fetch-site');
+ if(site==='cross-site')return next(new ApiError(403,'ORIGIN_BLOCKED','Cross-site requests blocked'));
+ if(origin){
+  let source:URL;
+  try{source=new URL(origin);}catch{return next(new ApiError(403,'ORIGIN_BLOCKED','Invalid Origin header'));}
+  if(!['http:','https:'].includes(source.protocol)||source.origin!==origin)return next(new ApiError(403,'ORIGIN_BLOCKED','Invalid Origin header'));
+  const trusted=process.env.PUBLIC_ORIGIN;
+  const expected=trusted||((req.secure?'https':'http')+'://'+req.headers.host);
+  if(origin!==expected)return next(new ApiError(403,'ORIGIN_BLOCKED','Cross-origin requests blocked'));
+ }
+ next();
+};
 const loginAttempts=new Map<string,{until:number,count:number}>();
 app.get('/api/v1/health',asyncRoute(async(_req,res)=>{await pool.query('SELECT 1');res.json({status:'ok',service:'plutus-api'});}));
 app.post('/api/v1/auth/login',csrf,asyncRoute(async(req,res)=>{const v=z.object({username:z.string().min(1),password:z.string().min(1)}).parse(req.body);const key=req.ip??'unknown';const now=Date.now();const attempt=loginAttempts.get(key);if(attempt&&attempt.count>=10&&attempt.until>now)return error(429,'RATE_LIMIT','Too many login attempts');

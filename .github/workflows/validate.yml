@@ -42,5 +42,7 @@ jobs:
         run: npm run test:api
       - name: Install headless Chromium
         run: npx playwright install --with-deps chromium
-      - name: Desktop and mobile browser E2E
+      - name: Desktop and mobile browser E2E (mock API)
         run: npm run test:e2e
+      - name: Desktop and mobile browser E2E (real PostgreSQL)
+        run: npm run test:e2e:live

@@ -12,7 +12,7 @@ This guide prepares the application services only. The owner manages DNS, Cloudf
 
 ## Prerequisites (not met/verified as of 2026-10-15)
 
-1. Review dedicated non-root service account and read-only code permissions.
+1. Provision dedicated non-root system identity `plutus` and group `plutus`; service unit templates intentionally require this account and refuse to start without it. Grant read/execute access to the deployment tree, and do not grant write access to application source.
 2. Provision `/etc/plutus/plutus.env` securely with database credentials and `PUBLIC_ORIGIN=https://plutus.followthesunth.com`, `COOKIE_SECURE=true`, `TRUST_PROXY=false`; restrict read access to service identity. Never commit production values.
 3. Apply approved SQL migrations to production via `npm run db:migrate` only after backup and change review; test DB migrations are not production migrations.
 4. Bootstrap Admin using a private one-time credential and rotate it.

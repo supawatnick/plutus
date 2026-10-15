@@ -4,6 +4,9 @@ After=postgresql.service
 Wants=postgresql.service
 
 [Service]
+User=plutus
+Group=plutus
+UMask=0077
 Type=simple
 WorkingDirectory=/srv/mcp-workspaces/plutus
 EnvironmentFile=/etc/plutus/plutus.env

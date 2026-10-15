@@ -16,8 +16,10 @@ Do **not** expose the API directly to the Internet or use a default password. No
 `PUBLIC_ORIGIN` is the preferred external application URL; enable `TRUST_PROXY=true` only when behind a controlled reverse proxy.
 
 ### Current restrictions
-- PostgreSQL 16 is installed on Plutus, and the initial SQL migration has been applied to the local database. Docker is not installed and the production API is not launched.
+- PostgreSQL 16 is installed on Plutus, and the SQL migrations 001–004 have been applied to the local database. Docker is not installed and the production API is not launched.
 - Browser E2E exercises mocked API responses; separate Node API integration tests have passed against an isolated real PostgreSQL database named `plutus_test`.
-- `database/001_initial.sql` is the active migration; `prisma/schema.prisma` is an earlier design draft, not the runtime ORM.
+- `database/001_initial.sql` through `004_case_insensitive_serial.sql` are the active migrations; `prisma/schema.prisma` is an earlier design draft, not the runtime ORM.
+- A dedicated `plutus-backup.timer` is enabled on Plutus for daily backups at 02:00 Asia/Bangkok; local restore verification passed. Backup remains on the same host, so off-host backups are not yet configured.
+- CSV and XLSX imports and exports are implemented; LINE webhook with signed read-only commands and 15-minute account linking is implemented but requires LINE credentials and end-to-end provider testing. Reminder queue exists but does not deliver messages.
 - External Cloudflare domain, LINE credentials and SMTP configuration are not yet supplied.
 - A quantity-stock design review is required before production: a partially borrowed quantity item can keep Available units while status shows Borrowed.

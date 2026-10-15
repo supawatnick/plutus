@@ -28,9 +28,9 @@ React + TypeScript + Vite + Tailwind CSS + TanStack Query/Table + React Hook For
 - Frontend: React 19 + Vite + TypeScript, responsive CSS (no Tailwind yet), accessible form workflows and mobile navigation.
 - Backend: Express 5 + TypeScript + node-postgres (`pg`) with explicit transaction locks, Argon2id local login, server-side session cookies and three RBAC roles. `prisma/schema.prisma` is a prior design draft, not used by the runtime.
 - PostgreSQL 16 installed on Plutus; initial migration applied to local database; isolated `plutus_test` database used for API integration testing.
-- Shipped UI flows: login, dashboard summary, inventory create/list/edit/location/status search, soft delete, checkout/return and CSV exports. Editing serialized identifiers and changing borrowed status through asset edit are not complete.
+- Shipped UI flows: login, dashboard with upcoming/overdue and Admin activity, inventory create/list/edit/location/status search, soft delete, checkout/return, CSV/XLSX exports, CSV/XLSX import preview and commit, and LINE linking code. Editing serialized identifiers and changing borrowed status through asset edit are not complete.
 - Verified locally: TypeScript/production build, browser Playwright Desktop/Mobile tests with mocked API, and transactional API integration tests against real PostgreSQL.
-- **Not deployed for users yet:** no configured production credentials/first admin/domain, production reverse proxy or LINE API credentials. XLSX import, notification worker, backups, and LINE integration are planned but not complete.
+- **Not deployed for users yet:** no configured production credentials/first admin/domain, production reverse proxy or LINE API credentials. XLSX import and automated local backups are implemented. Reminder queue and LINE webhook are implemented but require provider configuration, live delivery tests, and UAT. No public production deployment is configured.
 
 ## Implementation order
 1. Architecture, schema, and API contracts with clear invariants.

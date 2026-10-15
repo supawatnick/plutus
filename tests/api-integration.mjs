@@ -1,4 +1,4 @@
-import {spawn} from 'node:child_process';
+import {spawn,spawnSync} from 'node:child_process';
 import {setTimeout as pause} from 'node:timers/promises';
 import {randomUUID} from 'node:crypto';
 import pg from 'pg';
@@ -12,21 +12,24 @@ let server;
 const base='http://127.0.0.1:'+port+'/api/v1';
 async function call(method,path,body,cookie){const res=await fetch(base+path,{method,headers:{...(body?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{})},body:body?JSON.stringify(body):undefined});return {status:res.status,data:await res.json(),cookie:res.headers.get('set-cookie')?.split(';')[0]};}
 try{
- await pool.query('DELETE FROM audit_events');await pool.query('DELETE FROM returns');await pool.query('DELETE FROM loans');await pool.query('DELETE FROM inventory');await pool.query('DELETE FROM sessions');await pool.query('DELETE FROM app_users');
+ await pool.query('DELETE FROM notification_events');await pool.query('DELETE FROM line_link_codes');await pool.query('DELETE FROM line_accounts');await pool.query('DELETE FROM audit_events');await pool.query('DELETE FROM returns');await pool.query('DELETE FROM loans');await pool.query('DELETE FROM inventory');await pool.query('DELETE FROM sessions');await pool.query('DELETE FROM app_users');
  await pool.query('UPDATE sequences SET next_value=1');
  const h=await argon2.hash('integration-fixture-only');
  await pool.query('INSERT INTO app_users(id,username,password_hash,role) VALUES($1,$2,$3,$4)',[randomUUID(),'api-test-manager',h,'ASSET_MANAGER']);
  await pool.query('INSERT INTO app_users(id,username,password_hash,role) VALUES($1,$2,$3,$4)',[randomUUID(),'api-test-viewer',h,'VIEWER']);
  await pool.query('INSERT INTO app_users(id,username,password_hash,role) VALUES($1,$2,$3,$4)',[randomUUID(),'api-test-admin',h,'ADMIN']);
- server=spawn(process.execPath,['apps/api/dist/server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),COOKIE_SECURE:'false',TRUST_PROXY:'false'},stdio:'pipe'});
+ server=spawn(process.execPath,['apps/api/dist/server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),COOKIE_SECURE:'false',TRUST_PROXY:'false',LINE_CHANNEL_SECRET:'test-line-secret',LINE_CHANNEL_ACCESS_TOKEN:'test-only-token'},stdio:'pipe'});
  let ready=false;for(let i=0;i<80;i++){try{const r=await call('GET','/health');if(r.status===200){ready=true;break;}}catch{}await pause(100);}
  assert(ready,'API did not start');
  const unauth=await call('GET','/inventory');assert.equal(unauth.status,401);
  const login=await call('POST','/auth/login',{username:'api-test-manager',password:'integration-fixture-only'});assert.equal(login.status,200);const cookie=login.cookie;assert(cookie);
+ const linkCode=await call('POST','/integrations/line/link-code',{},cookie);assert.equal(linkCode.status,200);assert.equal(linkCode.data.code.length,16);
+ const invalidWebhook=await fetch(base+'/integrations/line/webhook',{method:'POST',headers:{'content-type':'application/json','x-line-signature':'invalid'},body:'{"events":[]}'});assert.equal(invalidWebhook.status,401);
  const create=await call('POST','/inventory',{name:'Switch Stock',serial:null,location:'IT Storage',status:'Available',quantity:3},cookie);assert.equal(create.status,201);const id=create.data.item.id;
  const serialized=await call('POST','/inventory',{name:'Laptop',serial:'unique-serial-test-001',location:'IT Storage',status:'Available'},cookie);assert.equal(serialized.status,201);
  const exportResponse=await fetch(base+'/exports/inventory.csv',{headers:{cookie}});assert.equal(exportResponse.status,200);assert((await exportResponse.text()).includes('Switch Stock'));
- const sampleCsv='Asset Name,Serial Number,Location,Status,Quantity\nImport Switch,IMPORT-001,IT Shelf,Available,1\nImport Duplicate,IMPORT-001,IT Shelf,Available,1\n';
+ const excelResponse=await fetch(base+'/exports/inventory.xlsx',{headers:{cookie}});assert.equal(excelResponse.status,200);const excelBytes=Buffer.from(await excelResponse.arrayBuffer());assert.equal(excelBytes.subarray(0,2).toString(),'PK');
+ const sampleCsv='Asset Name,Serial Number,Location,Status,Quantity\nImport Switch,IMPORT-001,IT Shelf,Available,1\nImport Duplicate,import-001,IT Shelf,Available,1\n';
  const makeImport=()=>{const f=new FormData();f.append('file',new Blob([sampleCsv],{type:'text/csv'}),'inventory.csv');return f;};
  const previewImport=await fetch(base+'/imports/inventory/preview',{method:'POST',headers:{cookie},body:makeImport()});assert.equal(previewImport.status,200);const previewBody=await previewImport.json();assert.equal(previewBody.ready,1);assert.equal(previewBody.skipped.length,1);
  const commitImport=await fetch(base+'/imports/inventory/commit',{method:'POST',headers:{cookie},body:makeImport()});assert.equal(commitImport.status,200);const commitBody=await commitImport.json();assert.equal(commitBody.imported,1);
@@ -36,7 +39,7 @@ try{
  const [one,two]=await Promise.all([call('POST','/loans',payload,cookie),call('POST','/loans',{...payload,quantity:2},cookie)]);
  assert.deepEqual([one.status,two.status].sort(),[201,409]);
  const loan=(one.status===201?one:two).data.loan;
- const other=await call('POST','/loans',{...payload,quantity:1},cookie);assert.equal(other.status,201);
+ const other=await call('POST','/loans',{...payload,quantity:1,expectedReturnAt:new Date(Date.now()+24*60*60*1000).toISOString()},cookie);assert.equal(other.status,201);
  const over=await call('POST','/loans',{...payload,quantity:1},cookie);assert.equal(over.status,409);
  const part=await call('POST','/loans/'+loan.id+'/returns',{quantity:1,newLocation:'Returned Shelf',resultingStatus:'Available'},cookie);assert.equal(part.status,200);assert.equal(part.data.loan.returned_qty,1);
  const finish=await call('POST','/loans/'+loan.id+'/returns',{quantity:1,newLocation:'Returned Shelf',resultingStatus:'Available'},cookie);assert.equal(finish.status,200);assert(finish.data.loan.closed_at);
@@ -45,6 +48,7 @@ try{
  const noConfirm=await call('PATCH','/inventory/'+serialized.data.item.id,{status:'Demo Lab',location:'Demo Lab'},cookie);assert.equal(noConfirm.status,409);
  const closeViaStatus=await call('PATCH','/inventory/'+serialized.data.item.id,{status:'Demo Lab',location:'Demo Lab',confirmCloseLoan:true},cookie);assert.equal(closeViaStatus.status,200);
  const closedRow=await pool.query('SELECT closed_at,returned_qty FROM loans WHERE id=$1',[serializedLoan.data.loan.id]);assert(closedRow.rows[0].closed_at);assert.equal(closedRow.rows[0].returned_qty,1);
+ const firstQueue=spawnSync(process.execPath,['scripts/queue-reminders.mjs'],{env:process.env,encoding:'utf8'});assert.equal(firstQueue.status,0,firstQueue.stderr);const secondQueue=spawnSync(process.execPath,['scripts/queue-reminders.mjs'],{env:process.env,encoding:'utf8'});assert.equal(secondQueue.status,0,secondQueue.stderr);const pending=await pool.query('SELECT channel,event_type FROM notification_events');assert.equal(pending.rowCount,2);assert(pending.rows.every(x=>x.event_type==='UPCOMING_RETURN'));
  const viewer=await call('POST','/auth/login',{username:'api-test-viewer',password:'integration-fixture-only'});assert.equal(viewer.status,200);const denied=await call('POST','/inventory',{name:'Blocked',location:'X'},viewer.cookie);assert.equal(denied.status,403);
  const audit=await pool.query('SELECT action FROM audit_events');assert(audit.rows.some(x=>x.action==='BORROW'));assert(audit.rows.some(x=>x.action==='RETURN'));
  console.log('PASS real PostgreSQL integration: auth, role restrictions, unique serial, concurrent stock checkout, partial return, audit');

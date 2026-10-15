@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily backup of Plutus PostgreSQL (02:00 Bangkok)
+
+[Timer]
+OnCalendar=*-*-* 02:00:00 Asia/Bangkok
+Persistent=true
+Unit=plutus-backup.service
+
+[Install]
+WantedBy=timers.target

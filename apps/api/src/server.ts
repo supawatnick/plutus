@@ -6,7 +6,7 @@ import argon2 from 'argon2';
 import multer from 'multer';
 import ExcelJS from 'exceljs';
 import {parse as csvParse} from 'csv-parse/sync';
-import { randomBytes, createHash, randomUUID } from 'node:crypto';
+import { randomBytes, createHash, createHmac, timingSafeEqual, randomUUID } from 'node:crypto';
 import { z, ZodError } from 'zod';
 
 const env=z.object({DATABASE_URL:z.string().min(1),PORT:z.coerce.number().int().positive().default(3001),COOKIE_SECURE:z.enum(['true','false']).default('true'),TRUST_PROXY:z.enum(['true','false']).default('false')}).safeParse(process.env);
@@ -14,8 +14,71 @@ if(!env.success){ console.error('Configure DATABASE_URL, PORT and cookie setting
 const config=env.data;
 const pool=new Pool({connectionString:config.DATABASE_URL,max:8});
 const app=express();
+const lineSecret=process.env.LINE_CHANNEL_SECRET;
+const lineAccessToken=process.env.LINE_CHANNEL_ACCESS_TOKEN;
 if(config.TRUST_PROXY==='true') app.set('trust proxy',1);
-app.disable('x-powered-by');app.use(helmet());app.use(express.json({limit:'128kb'}));
+app.disable('x-powered-by');app.use(helmet());
+
+type LineEvent={type?:string;replyToken?:string;source?:{userId?:string};message?:{type?:string;text?:string}};
+function commandFromText(input:string){const text=input.trim().slice(0,160);if(/^(รายการยืม|loans)$/i.test(text))return {type:'LOANS' as const,value:''};const status=text.match(/^(?:สถานะ|status)\s+(AST-\d{6,})$/i);if(status)return {type:'STATUS' as const,value:status[1].toUpperCase()};const search=text.match(/^(?:ค้นหา|search)\s+(.{1,80})$/i);if(search)return {type:'SEARCH' as const,value:search[1]};return {type:'HELP' as const,value:''};}
+async function lineNaturalCommand(text:string){
+ const key=process.env.OPENAI_API_KEY;if(!key)return commandFromText(text);
+ if(commandFromText(text).type!=='HELP')return commandFromText(text);
+ const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),8000);
+ try{
+  const response=await fetch('https://api.openai.com/v1/chat/completions',{method:'POST',signal:controller.signal,headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({model:process.env.OPENAI_MODEL||'gpt-4.1-mini',temperature:0,max_tokens:80,messages:[{role:'system',content:'Classify an IT inventory question. Output exactly one of: LOANS, STATUS AST-000001, SEARCH followed by a search phrase (max 80 characters), HELP. No other output. Never create, edit, borrow or return data.'},{role:'user',content:text.slice(0,200)}]})});
+  if(!response.ok)return {type:'HELP' as const,value:''};
+  const result=await response.json() as {choices?:{message?:{content?:string}}[]};const output=result.choices?.[0]?.message?.content?.trim()||'';
+  return commandFromText(output);
+ }catch{return {type:'HELP' as const,value:''};}finally{clearTimeout(timer);}
+}
+async function lineAnswer(command:{type:'LOANS'|'STATUS'|'SEARCH'|'HELP';value:string}){
+ if(command.type==='STATUS'){const r=await pool.query('SELECT display_id,name,status,location,available_qty,total_qty FROM inventory WHERE display_id=$1 AND deleted_at IS NULL',[command.value]);if(!r.rowCount)return 'ไม่พบ Asset ID นี้';const a=r.rows[0];return [a.display_id,a.name,'Status: '+a.status,'Location: '+a.location,'Available: '+a.available_qty+'/'+a.total_qty].join('\n');}
+ if(command.type==='SEARCH'){const term=command.value.slice(0,80).replace(/[\\%_]/g,'\\$&');const r=await pool.query("SELECT display_id,name,status,location FROM inventory WHERE deleted_at IS NULL AND (display_id ILIKE $1 ESCAPE '\\' OR name ILIKE $1 ESCAPE '\\' OR serial ILIKE $1 ESCAPE '\\') ORDER BY display_id LIMIT 5",['%'+term+'%']);return r.rowCount?r.rows.map(a=>[a.display_id,a.name,a.status,a.location].join(' / ')).join('\n'):'ไม่พบอุปกรณ์ที่ค้นหา';}
+ if(command.type==='LOANS'){const r=await pool.query('SELECT i.display_id,l.borrower_name,l.expected_return_at FROM loans l JOIN inventory i ON i.id=l.inventory_id WHERE l.closed_at IS NULL ORDER BY l.borrowed_at DESC LIMIT 5');return r.rowCount?r.rows.map(a=>a.display_id+' / '+a.borrower_name+' / '+(a.expected_return_at?new Date(a.expected_return_at).toISOString().slice(0,10):'ไม่กำหนดคืน')).join('\n'):'ไม่มีรายการยืมค้าง';}
+ return 'คำสั่ง: สถานะ AST-000001, ค้นหา <ชื่อหรือ Serial>, รายการยืม\nAI ตอบคำถามเพิ่มเติมได้เมื่อตั้งค่า OpenAI API Key';
+}
+app.post('/api/v1/integrations/line/webhook',express.raw({type:'application/json',limit:'64kb'}),async(req,res)=>{
+ try{
+  if(!lineSecret||!lineAccessToken)return res.status(503).json({code:'LINE_DISABLED'});
+  if(!Buffer.isBuffer(req.body))return res.status(400).json({code:'BODY_INVALID'});
+  const signature=req.header('x-line-signature')||'';
+  const candidate=createHmac('sha256',lineSecret).update(req.body).digest('base64');
+  const lhs=Buffer.from(signature),rhs=Buffer.from(candidate);
+  if(lhs.length!==rhs.length||!timingSafeEqual(lhs,rhs))return res.status(401).json({code:'BAD_SIGNATURE'});
+  const parsed=JSON.parse(req.body.toString('utf8')) as {events?:LineEvent[]};
+  if(!Array.isArray(parsed.events)||parsed.events.length>10)return res.status(400).json({code:'INVALID_EVENTS'});
+  for(const event of parsed.events){
+   if(event.type!=='message'||event.message?.type!=='text'||!event.source?.userId||!event.replyToken)continue;
+   const identity=await pool.query('SELECT u.id FROM line_accounts l JOIN app_users u ON u.id=l.user_id WHERE l.line_user_id=$1 AND l.revoked_at IS NULL AND u.active=true',[event.source.userId]);
+   let answer='LINE account นี้ยังไม่ได้ผูกกับบัญชี IT ของ Plutus';
+   const linking=(event.message.text||'').trim().match(/^(?:ผูกบัญชี|link)\s+([A-Za-z0-9_-]{16})$/i);
+   if(!identity.rowCount&&linking){
+    const linked=await tx(async c=>{
+     const found=await c.query('SELECT l.user_id FROM line_link_codes l JOIN app_users u ON u.id=l.user_id WHERE l.token_hash=$1 AND l.expires_at>now() AND u.active=true FOR UPDATE OF l',[hash(linking[1])]);
+     if(!found.rowCount)return false;
+     const bound=await c.query('SELECT 1 FROM line_accounts WHERE line_user_id=$1 AND revoked_at IS NULL',[event.source!.userId]);
+     if(bound.rowCount)return false;
+     const id=randomUUID();
+     await c.query('INSERT INTO line_accounts(id,user_id,line_user_id) VALUES($1,$2,$3)',[id,found.rows[0].user_id,event.source!.userId]);
+     await c.query('DELETE FROM line_link_codes WHERE user_id=$1',[found.rows[0].user_id]);
+     await audit(c,found.rows[0].user_id,'LINE_LINK','USER',found.rows[0].user_id,null,{linked:true});
+     return true;
+    });
+    answer=linked?'เชื่อมบัญชี Plutus สำเร็จแล้ว ใช้คำสั่ง ค้นหา หรือ สถานะ ได้เลย':'รหัสเชื่อมบัญชีไม่ถูกต้อง หมดอายุ หรือถูกใช้แล้ว';
+   }else if(identity.rowCount){
+    const cmd=await lineNaturalCommand(event.message.text||'');
+    answer=await lineAnswer(cmd);
+    await pool.query('INSERT INTO audit_events(id,user_id,action,entity_type,entity_id,after_value) VALUES($1,$2,$3,$4,$5,$6)',[randomUUID(),identity.rows[0].id,'LINE_QUERY','LINE',null,JSON.stringify({command:cmd.type})]);
+   }
+   const reply=await fetch('https://api.line.me/v2/bot/message/reply',{method:'POST',headers:{Authorization:'Bearer '+lineAccessToken,'Content-Type':'application/json'},body:JSON.stringify({replyToken:event.replyToken,messages:[{type:'text',text:answer.slice(0,4500)}]})});
+   if(!reply.ok)throw new Error('LINE reply failed: '+reply.status);
+  }
+  return res.json({ok:true});
+ }catch(e){console.error('LINE integration error',e instanceof Error?e.message:'unknown');return res.status(502).json({code:'LINE_PROCESSING_FAILED'});}
+});
+
+app.use(express.json({limit:'128kb'}));
 const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:2*1024*1024,files:1}});
 type Role='ADMIN'|'ASSET_MANAGER'|'VIEWER';
 type Principal={id:string;username:string;role:Role};
@@ -47,6 +110,15 @@ app.post('/api/v1/auth/login',csrf,asyncRoute(async(req,res)=>{const v=z.object(
 }));
 app.get('/api/v1/auth/me',session,(req,res)=>res.json({user:req.principal}));
 app.post('/api/v1/auth/logout',session,csrf,asyncRoute(async(req,res)=>{await pool.query('DELETE FROM sessions WHERE token_hash=$1',[hash(req.sessionToken!)]);res.clearCookie('plutus_session',{path:'/'});res.json({ok:true});}));
+app.post('/api/v1/integrations/line/link-code',session,csrf,asyncRoute(async(req,res)=>{
+ const code=randomBytes(12).toString('base64url');
+ await tx(async c=>{await c.query('DELETE FROM line_link_codes WHERE user_id=$1 OR expires_at<now()',[req.principal!.id]);await c.query("INSERT INTO line_link_codes(token_hash,user_id,expires_at) VALUES($1,$2,now()+interval '15 minutes')",[hash(code),req.principal!.id]);await audit(c,req.principal!.id,'LINE_LINK_CODE','USER',req.principal!.id,null,{expiresInMinutes:15});});
+ res.json({code,expiresInMinutes:15,instruction:'Send: ผูกบัญชี '+code+' to the Plutus LINE Bot'});
+}));
+app.delete('/api/v1/integrations/line/account',session,csrf,asyncRoute(async(req,res)=>{
+ await tx(async c=>{await c.query('UPDATE line_accounts SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL',[req.principal!.id]);await c.query('DELETE FROM line_link_codes WHERE user_id=$1',[req.principal!.id]);await audit(c,req.principal!.id,'LINE_UNLINK','USER',req.principal!.id,null,{revoked:true});});
+ res.json({ok:true});
+}));
 app.get('/api/v1/inventory',session,asyncRoute(async(req,res)=>{const q=z.object({search:z.string().max(200).optional(),status:z.enum(['Available','Borrowed','Demo Lab','Retired']).optional(),limit:z.coerce.number().int().min(1).max(200).default(50),offset:z.coerce.number().int().min(0).default(0)}).parse(req.query);
  const params:any[]=[];let clause='WHERE deleted_at IS NULL';if(q.search){params.push('%'+q.search+'%');clause+=` AND (display_id ILIKE $${params.length} OR name ILIKE $${params.length} OR coalesce(serial,'') ILIKE $${params.length} OR location ILIKE $${params.length} OR id IN (SELECT inventory_id FROM loans WHERE borrower_name ILIKE $${params.length}))`;}if(q.status){params.push(q.status);clause+=` AND status=$${params.length}`;}
  const count=await pool.query('SELECT count(*)::int AS n FROM inventory '+clause,params);params.push(q.limit,q.offset);
@@ -78,7 +150,7 @@ app.get('/api/v1/users',session,allow('ADMIN'),asyncRoute(async(_req,res)=>{cons
 app.post('/api/v1/users',session,allow('ADMIN'),csrf,asyncRoute(async(req,res)=>{const v=z.object({username:z.string().trim().min(3).max(64).regex(/^[a-zA-Z0-9._-]+$/),password:z.string().min(16).max(200),role:z.enum(['ADMIN','ASSET_MANAGER','VIEWER'])}).parse(req.body);const result=await tx(async c=>{const id=randomUUID();const pwd=await argon2.hash(v.password,{type:argon2.argon2id,memoryCost:65536,timeCost:3,parallelism:1});const r=await c.query('INSERT INTO app_users(id,username,password_hash,role) VALUES ($1,$2,$3,$4) RETURNING id,username,role,active',[id,v.username,pwd,v.role]);await audit(c,req.principal!.id,'CREATE_USER','USER',id,null,r.rows[0]);return r.rows[0];});res.status(201).json({user:result});}));
 app.patch('/api/v1/users/:id',session,allow('ADMIN'),csrf,asyncRoute(async(req,res)=>{const v=z.object({role:z.enum(['ADMIN','ASSET_MANAGER','VIEWER']).optional(),active:z.boolean().optional(),password:z.string().min(16).max(200).optional()}).refine(x=>Object.keys(x).length>0).parse(req.body);const updated=await tx(async c=>{await c.query('SELECT pg_advisory_xact_lock(1984001)');const before=await c.query('SELECT id,username,role,active FROM app_users WHERE id=$1 FOR UPDATE',[req.params.id]);if(!before.rows.length)return error(404,'NOT_FOUND','User not found');const prior=before.rows[0];if(prior.role==='ADMIN'&&prior.active&&(v.role&&v.role!=='ADMIN'||v.active===false)){const count=await c.query("SELECT count(*)::int AS n FROM app_users WHERE role='ADMIN' AND active=true");if(count.rows[0].n<=1)return error(409,'LAST_ADMIN','Cannot disable or demote the last active administrator');}
  const pwd=v.password?await argon2.hash(v.password,{type:argon2.argon2id,memoryCost:65536,timeCost:3,parallelism:1}):null;const result=await c.query('UPDATE app_users SET role=$2,active=$3,password_hash=coalesce($4,password_hash) WHERE id=$1 RETURNING id,username,role,active',[prior.id,v.role??prior.role,v.active??prior.active,pwd]);if(v.active===false||v.password||v.role&&v.role!==prior.role)await c.query('DELETE FROM sessions WHERE user_id=$1',[prior.id]);await audit(c,req.principal!.id,'UPDATE_USER','USER',prior.id,prior,{...result.rows[0],passwordChanged:Boolean(v.password)});return result.rows[0];});res.json({user:updated});}));
-app.get('/api/v1/dashboard',session,asyncRoute(async(req,res)=>{const r=await pool.query("SELECT count(*)::int AS total,coalesce(sum(available_qty),0)::int AS available,coalesce(sum(total_qty-available_qty),0)::int AS unavailable,coalesce(sum(CASE WHEN status='Demo Lab' THEN total_qty ELSE 0 END),0)::int AS demo_lab,coalesce(sum(CASE WHEN status='Retired' THEN total_qty ELSE 0 END),0)::int AS retired FROM inventory WHERE deleted_at IS NULL");const overdue=await pool.query('SELECT count(*)::int AS total FROM loans WHERE closed_at IS NULL AND expected_return_at<now()');res.json({totals:r.rows[0],overdue:overdue.rows[0].total});}));
+app.get('/api/v1/dashboard',session,asyncRoute(async(req,res)=>{const r=await pool.query("SELECT count(*)::int AS total,coalesce(sum(available_qty),0)::int AS available,coalesce(sum(total_qty-available_qty),0)::int AS unavailable,coalesce(sum(CASE WHEN status='Demo Lab' THEN total_qty ELSE 0 END),0)::int AS demo_lab,coalesce(sum(CASE WHEN status='Retired' THEN total_qty ELSE 0 END),0)::int AS retired FROM inventory WHERE deleted_at IS NULL");const overdue=await pool.query('SELECT count(*)::int AS total FROM loans WHERE closed_at IS NULL AND expected_return_at<now()');const upcoming=await pool.query("SELECT count(*)::int AS total FROM loans WHERE closed_at IS NULL AND expected_return_at>=now() AND expected_return_at<=now()+interval '3 days'");const recent=req.principal!.role==='ADMIN'?(await pool.query('SELECT action,entity_type,entity_id,created_at FROM audit_events ORDER BY created_at DESC LIMIT 8')).rows:[];res.json({totals:r.rows[0],overdue:overdue.rows[0].total,upcoming:upcoming.rows[0].total,recentActivity:recent});}));
 
 type ImportItem={name:string;serial:string|null;location:string;status:'Available'|'Demo Lab'|'Retired';quantity:number;row:number};
 async function parseInventoryFile(file:Express.Multer.File|undefined):Promise<{rows:ImportItem[];errors:string[]}>{
@@ -108,17 +180,17 @@ async function parseInventoryFile(file:Express.Multer.File|undefined):Promise<{r
 }
 const importHandler=(commit:boolean):express.RequestHandler=>asyncRoute(async(req,res)=>{
  const parsed=await parseInventoryFile(req.file);
- const serials=parsed.rows.filter(r=>r.serial).map(r=>r.serial!);
- const existing=serials.length?(await pool.query('SELECT serial FROM inventory WHERE serial=ANY($1::text[])',[serials])).rows.map(x=>x.serial as string):[];
+ const serials=parsed.rows.filter(r=>r.serial).map(r=>r.serial!.toLowerCase());
+ const existing=serials.length?(await pool.query('SELECT lower(serial) AS serial FROM inventory WHERE lower(serial)=ANY($1::text[])',[serials])).rows.map(x=>x.serial as string):[];
  const known=new Set<string>(existing);const newRows:ImportItem[]=[],skipped:{row:number;reason:string}[]=[];
- for(const row of parsed.rows){if(row.serial&&known.has(row.serial)){skipped.push({row:row.row,reason:'Duplicate serial number'});continue;}if(row.serial)known.add(row.serial);newRows.push(row);}
+ for(const row of parsed.rows){if(row.serial&&known.has(row.serial.toLowerCase())){skipped.push({row:row.row,reason:'Duplicate serial number'});continue;}if(row.serial)known.add(row.serial.toLowerCase());newRows.push(row);}
  if(!commit)return res.json({total:parsed.rows.length+parsed.errors.length,ready:newRows.length,skipped,errors:parsed.errors,preview:newRows.slice(0,30)});
  if(parsed.errors.length)return res.status(422).json({code:'IMPORT_INVALID',message:'Correct invalid rows before importing',errors:parsed.errors});
  const result=await tx(async c=>{let inserted=0;const skippedAtCommit=[...skipped];
  for(const row of newRows){
-  if(row.serial){const exists=await c.query('SELECT 1 FROM inventory WHERE serial=$1',[row.serial]);if(exists.rowCount){skippedAtCommit.push({row:row.row,reason:'Already imported'});continue;}}
+  if(row.serial){const exists=await c.query('SELECT 1 FROM inventory WHERE lower(serial)=lower($1)',[row.serial]);if(exists.rowCount){skippedAtCommit.push({row:row.row,reason:'Already imported'});continue;}}
   const id=randomUUID(),display=await nextId(c,'asset'),kind=row.serial?'SERIALIZED':'QUANTITY';
-  const output=await c.query('INSERT INTO inventory(id,display_id,name,serial,kind,status,location,total_qty,available_qty) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (serial) DO NOTHING RETURNING *',[id,display,row.name,row.serial,kind,row.status,row.location,row.quantity,row.status==='Available'?row.quantity:0]);
+  const output=await c.query('INSERT INTO inventory(id,display_id,name,serial,kind,status,location,total_qty,available_qty) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING RETURNING *',[id,display,row.name,row.serial,kind,row.status,row.location,row.quantity,row.status==='Available'?row.quantity:0]);
   if(!output.rowCount){skippedAtCommit.push({row:row.row,reason:'Serial already exists'});continue;}
   inserted++;await audit(c,req.principal!.id,'IMPORT_CREATE','INVENTORY',id,null,output.rows[0]);
  }
@@ -132,6 +204,24 @@ const csvCell=(value:unknown)=>{const raw=String(value??'');const guarded=/^[=+@
 const csv=(headers:string[],rows:unknown[][])=>'\ufeff'+[headers,...rows.map(r=>r.map(String))].map(r=>r.map(csvCell).join(',')).join('\r\n')+'\r\n';
 app.get('/api/v1/exports/inventory.csv',session,asyncRoute(async(_req,res)=>{const r=await pool.query('SELECT display_id,name,serial,kind,status,location,total_qty,available_qty FROM inventory WHERE deleted_at IS NULL ORDER BY display_id');const rows=r.rows.map(a=>[a.display_id,a.name,a.serial??'',a.kind,a.status,a.location,a.total_qty,a.available_qty]);res.set('Content-Type','text/csv; charset=utf-8');res.set('Content-Disposition','attachment; filename="plutus-inventory.csv"');res.send(csv(['Asset ID','Asset Name','Serial Number','Kind','Status','Location','Total Quantity','Available Quantity'],rows));}));
 app.get('/api/v1/exports/loans.csv',session,asyncRoute(async(_req,res)=>{const r=await pool.query('SELECT l.loan_number,i.display_id,l.borrower_name,l.borrower_email,l.customer_name,l.customer_site,l.project_name,l.quantity,l.returned_qty,l.borrowed_at,l.expected_return_at,l.closed_at FROM loans l JOIN inventory i ON i.id=l.inventory_id ORDER BY l.borrowed_at DESC');const rows=r.rows.map(a=>[a.loan_number,a.display_id,a.borrower_name,a.borrower_email,a.customer_name,a.customer_site,a.project_name,a.quantity,a.returned_qty,a.borrowed_at?.toISOString(),a.expected_return_at?.toISOString(),a.closed_at?.toISOString()]);res.set('Content-Type','text/csv; charset=utf-8');res.set('Content-Disposition','attachment; filename="plutus-loans.csv"');res.send(csv(['Loan ID','Asset ID','Borrower','Email','Customer','Site','Project','Quantity','Returned','Borrowed At','Expected Return','Closed At'],rows));}));
+
+const spreadsheet=async(columns:string[],rows:unknown[][]):Promise<Buffer>=>{
+ const book=new ExcelJS.Workbook();const sheet=book.addWorksheet('Plutus');
+ sheet.addRow(columns);sheet.getRow(1).font={bold:true};sheet.views=[{state:'frozen',ySplit:1}];
+ for(const row of rows)sheet.addRow(row.map(value=>{const str=String(value??'');return /^[=+@-]/.test(str)?"'"+str:str;}));
+ sheet.columns=columns.map((head,index)=>({width:Math.min(45,Math.max(14,head.length+5,...rows.slice(0,100).map(r=>String(r[index]??'').length+3)))}));
+ return Buffer.from(await book.xlsx.writeBuffer());
+};
+app.get('/api/v1/exports/inventory.xlsx',session,asyncRoute(async(_req,res)=>{
+ const result=await pool.query('SELECT display_id,name,serial,kind,status,location,total_qty,available_qty FROM inventory WHERE deleted_at IS NULL ORDER BY display_id');
+ const file=await spreadsheet(['Asset ID','Asset Name','Serial','Kind','Status','Location','Total Quantity','Available Quantity'],result.rows.map(r=>[r.display_id,r.name,r.serial??'',r.kind,r.status,r.location,r.total_qty,r.available_qty]));
+ res.set('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');res.set('Content-Disposition','attachment; filename="plutus-inventory.xlsx"');res.send(file);
+}));
+app.get('/api/v1/exports/loans.xlsx',session,asyncRoute(async(_req,res)=>{
+ const result=await pool.query('SELECT l.loan_number,i.display_id,l.borrower_name,l.borrower_email,l.customer_name,l.customer_site,l.project_name,l.quantity,l.returned_qty,l.borrowed_at,l.expected_return_at,l.closed_at FROM loans l JOIN inventory i ON i.id=l.inventory_id ORDER BY l.borrowed_at DESC');
+ const file=await spreadsheet(['Loan ID','Asset ID','Borrower','Email','Customer','Site','Project','Quantity','Returned','Borrowed At','Expected Return','Closed At'],result.rows.map(r=>[r.loan_number,r.display_id,r.borrower_name,r.borrower_email,r.customer_name,r.customer_site,r.project_name,r.quantity,r.returned_qty,r.borrowed_at?.toISOString(),r.expected_return_at?.toISOString(),r.closed_at?.toISOString()]));
+ res.set('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');res.set('Content-Disposition','attachment; filename="plutus-loans.xlsx"');res.send(file);
+}));
 app.get('/api/v1/audit',session,allow('ADMIN'),asyncRoute(async(_req,res)=>{const r=await pool.query('SELECT id,user_id,action,entity_type,entity_id,created_at FROM audit_events ORDER BY created_at DESC LIMIT 100');res.json({items:r.rows});}));
 app.use('/api',(_req,res)=>res.status(404).json({code:'NOT_FOUND',message:'No such endpoint'}));
 app.use((e:unknown,_req:express.Request,res:express.Response,_next:express.NextFunction)=>{if(e instanceof ZodError)return res.status(400).json({code:'VALIDATION_ERROR',message:'Invalid request',details:e.flatten()});if(e instanceof ApiError)return res.status(e.status).json({code:e.code,message:e.message});const pg=e as {code?:string};if(pg.code==='23505')return res.status(409).json({code:'DUPLICATE',message:'An existing record uses this identifier'});console.error('API error',e);return res.status(500).json({code:'INTERNAL_ERROR',message:'Unexpected server error'});});

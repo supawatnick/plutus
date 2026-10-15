@@ -38,6 +38,8 @@ try{
  const commitImport=await fetch(base+'/imports/inventory/commit',{method:'POST',headers:{cookie},body:makeImport()});assert.equal(commitImport.status,200);const commitBody=await commitImport.json();assert.equal(commitBody.imported,1);
  const retryImport=await fetch(base+'/imports/inventory/commit',{method:'POST',headers:{cookie},body:makeImport()});assert.equal(retryImport.status,200);assert.equal((await retryImport.json()).imported,0);
  const duplicate=await call('POST','/inventory',{name:'Laptop 2',serial:'unique-serial-test-001',location:'IT Storage',status:'Available'},cookie);assert.equal(duplicate.status,409);
+ const inventorySearch=await call('GET','/inventory?search=Switch&limit=1&offset=0',undefined,cookie);assert.equal(inventorySearch.status,200);assert.equal(inventorySearch.data.total,2);assert.equal(inventorySearch.data.items.length,1);
+ const inventoryPageTwo=await call('GET','/inventory?search=Switch&limit=1&offset=1',undefined,cookie);assert.equal(inventoryPageTwo.status,200);assert.equal(inventoryPageTwo.data.items.length,1);assert.notEqual(inventorySearch.data.items[0].id,inventoryPageTwo.data.items[0].id);
  const payload={inventoryId:id,borrowerName:'Test Borrower',borrowerEmail:'test@example.invalid',customerName:'Test Company',customerSite:'Test Site',projectName:'Project 1',quantity:2};
  const [one,two]=await Promise.all([call('POST','/loans',payload,cookie),call('POST','/loans',{...payload,quantity:2},cookie)]);
  assert.deepEqual([one.status,two.status].sort(),[201,409]);
@@ -56,6 +58,16 @@ try{
  const closedRow=await pool.query('SELECT closed_at,returned_qty FROM loans WHERE id=$1',[serializedLoan.data.loan.id]);assert(closedRow.rows[0].closed_at);assert.equal(closedRow.rows[0].returned_qty,1);
  const firstQueue=spawnSync(process.execPath,['scripts/queue-reminders.mjs'],{env:process.env,encoding:'utf8'});assert.equal(firstQueue.status,0,firstQueue.stderr);const secondQueue=spawnSync(process.execPath,['scripts/queue-reminders.mjs'],{env:process.env,encoding:'utf8'});assert.equal(secondQueue.status,0,secondQueue.stderr);const pending=await pool.query('SELECT channel,event_type FROM notification_events');assert.equal(pending.rowCount,2);assert(pending.rows.every(x=>x.event_type==='UPCOMING_RETURN'));
  const viewer=await call('POST','/auth/login',{username:'api-test-viewer',password:'integration-fixture-only'});assert.equal(viewer.status,200);const denied=await call('POST','/inventory',{name:'Blocked',location:'X'},viewer.cookie);assert.equal(denied.status,403);
+ const adminLogin=await call('POST','/auth/login',{username:'api-test-admin',password:'integration-fixture-only'});assert.equal(adminLogin.status,200);
+ const viewerAccounts=await call('GET','/users',undefined,viewer.cookie);assert.equal(viewerAccounts.status,403);
+ const viewerAudit=await call('GET','/audit',undefined,viewer.cookie);assert.equal(viewerAudit.status,403);
+ const newAccount=await call('POST','/users',{username:'managed-user',password:'integration-managed-pass',role:'VIEWER'},adminLogin.cookie);assert.equal(newAccount.status,201);
+ const accountLogin=await call('POST','/auth/login',{username:'managed-user',password:'integration-managed-pass'});assert.equal(accountLogin.status,200);
+ const disableAccount=await call('PATCH','/users/'+newAccount.data.user.id,{active:false},adminLogin.cookie);assert.equal(disableAccount.status,200);
+ const revokedSession=await call('GET','/auth/me',undefined,accountLogin.cookie);assert.equal(revokedSession.status,401);
+ const disabledLogin=await call('POST','/auth/login',{username:'managed-user',password:'integration-managed-pass'});assert.equal(disabledLogin.status,401);
+ const adminRow=await pool.query("SELECT id FROM app_users WHERE username='api-test-admin'");
+ const lastAdmin=await call('PATCH','/users/'+adminRow.rows[0].id,{active:false},adminLogin.cookie);assert.equal(lastAdmin.status,409);
  const audit=await pool.query('SELECT action FROM audit_events');assert(audit.rows.some(x=>x.action==='BORROW'));assert(audit.rows.some(x=>x.action==='RETURN'));
  console.log('PASS real PostgreSQL integration: auth, role restrictions, unique serial, concurrent stock checkout, partial return, audit');
 }finally{server?.kill('SIGTERM');await pool.end();}

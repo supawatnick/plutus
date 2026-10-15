@@ -15,7 +15,7 @@ async function mockApi(page:Page){
   if(path==='/api/v1/auth/me')return respond(signedIn?{user:{id:'admin',username:'itadmin',role:'ADMIN'}}:{message:'Please sign in'},signedIn?200:401);
   if(path==='/api/v1/auth/login'&&method==='POST'){signedIn=true;return respond({user:{id:'admin',username:'itadmin',role:'ADMIN'}});}
   if(path==='/api/v1/auth/logout'&&method==='POST'){signedIn=false;return respond({ok:true});}
-  if(path==='/api/v1/inventory'&&method==='GET')return respond({items:assets,total:assets.length});
+  if(path==='/api/v1/inventory'&&method==='GET'){const q=(url.searchParams.get('search')||'').toLowerCase(),s=url.searchParams.get('status');const matching=assets.filter(a=>[a.displayId,a.name,a.serial||'',a.location].some(x=>x.toLowerCase().includes(q))&&(!s||a.status===s));const offset=Number(url.searchParams.get('offset')||0),limit=Number(url.searchParams.get('limit')||50);return respond({items:matching.slice(offset,offset+limit),total:matching.length});}
   if(path==='/api/v1/inventory'&&method==='POST'){const a:Asset={id:'22222222-2222-4222-8222-222222222222',displayId:'AST-000002',name:body.name,serial:body.serial,kind:body.serial?'SERIALIZED':'QUANTITY',status:body.status,location:body.location,totalQuantity:body.quantity,availableQuantity:body.quantity};assets.push(a);return respond({item:a},201);}
   if(path.startsWith('/api/v1/inventory/')&&method==='PATCH'){const a=assets.find(x=>x.id===path.split('/').at(-1));if(!a)return respond({message:'Missing'},404);Object.assign(a,body);return respond({item:a});}
   if(path.startsWith('/api/v1/inventory/')&&method==='DELETE'){const index=assets.findIndex(x=>x.id===path.split('/').at(-1));if(index>=0)assets.splice(index,1);return respond({ok:true});}

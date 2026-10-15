@@ -1,0 +1,10 @@
+[Unit]
+Description=Plutus notification scheduler (disabled until provider UAT)
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+Unit=plutus-notifications.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,16 @@
+[Unit]
+Description=Plutus notification queue and delivery (provider-configured only)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/mcp-workspaces/plutus
+Environment=PATH=/opt/mcp/node-v24/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+EnvironmentFile=/etc/plutus/plutus.env
+ExecStart=/opt/mcp/node-v24/bin/npm run notifications:queue
+ExecStart=/opt/mcp/node-v24/bin/npm run notifications:deliver
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true

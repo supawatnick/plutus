@@ -13,7 +13,9 @@
     "test:e2e": "playwright test",
     "test:e2e:live": "playwright test --config=playwright.live.config.ts",
     "test:api": "node tests/api-integration.mjs",
-    "db:migrate": "node scripts/migrate.mjs"
+    "db:migrate": "node scripts/migrate.mjs",
+    "notifications:queue": "node scripts/queue-reminders.mjs",
+    "notifications:deliver": "node scripts/deliver-notifications.mjs"
   },
   "engines": {
     "node": ">=24"

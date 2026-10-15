@@ -8,7 +8,8 @@
 - Responsive Admin UI has user creation, role/active changes and latest 100 audit events; backend exclusively grants Admin access.
 - Inventory list now requests 25 records per page from the server, with server search/status filtering.
 - `plutus-backup.timer` was observed enabled and active. Prior isolated restore verification is documented in `docs/BACKUP.md`.
-- Notification delivery worker and migration 005 tested on isolated PostgreSQL. Unconfigured channels remain PENDING, with no false SENT events; real provider sending and retries are still unverified.
+- Notification delivery worker and migration 005 tested on isolated PostgreSQL. Unconfigured channels remain PENDING and retry/backoff is asserted with no external send; real provider acknowledgement is still unverified.
+- A loopback-only web origin and API reverse proxy now passes real browser→web origin→Express→PostgreSQL E2E on desktop/mobile. Production systemd units exist as uninstalled templates; see `docs/WEB_ORIGIN.md`.
 
 ## Still BLOCKING production acceptance
 1. Production service is **not deployed**; credentials, initial administrator and LAN/HTTPS smoke tests remain unverified.

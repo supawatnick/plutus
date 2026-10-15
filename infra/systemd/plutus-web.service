@@ -1,0 +1,23 @@
+[Unit]
+Description=Plutus web origin and local API reverse proxy
+After=plutus-api.service
+Requires=plutus-api.service
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/mcp-workspaces/plutus
+EnvironmentFile=/etc/plutus/plutus.env
+Environment=PATH=/opt/mcp/node-v24/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+Environment=WEB_HOST=127.0.0.1
+Environment=WEB_PORT=4173
+Environment=API_PORT=3001
+ExecStart=/opt/mcp/node-v24/bin/node scripts/serve-web.mjs
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

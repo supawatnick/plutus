@@ -4,13 +4,6 @@ import {randomUUID} from 'node:crypto';
 // Real browser -> API -> PostgreSQL. No mocked responses or test-table cleanup.
 // The isolated plutus_test database must first be seeded by npm run test:api.
 test('signed-in inventory create, checkout, return on live database',async({page},info)=>{
- await page.route('**/api/v1/**',async route=>{
-  const original=route.request();
-  const url=new URL(original.url());
-  const upstream='http://127.0.0.1:3302'+url.pathname+url.search;
-  const response=await route.fetch({url:upstream,headers:{...original.headers(),origin:'http://127.0.0.1:3302',host:'127.0.0.1:3302'}});
-  await route.fulfill({response});
- });
  await page.goto('/');
  await page.getByLabel('USERNAME').fill('api-test-manager');
  await page.getByLabel('PASSWORD').fill('integration-fixture-only');

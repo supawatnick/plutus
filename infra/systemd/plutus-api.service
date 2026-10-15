@@ -1,0 +1,20 @@
+[Unit]
+Description=Plutus IT Asset API
+After=postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/mcp-workspaces/plutus
+EnvironmentFile=/etc/plutus/plutus.env
+Environment=PATH=/opt/mcp/node-v24/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+ExecStart=/opt/mcp/node-v24/bin/node apps/api/dist/server.js
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

@@ -20,7 +20,7 @@ if(config.TRUST_PROXY==='true') app.set('trust proxy',1);
 app.disable('x-powered-by');app.use(helmet());
 
 type LineEvent={type?:string;replyToken?:string;source?:{userId?:string};message?:{type?:string;text?:string}};
-function commandFromText(input:string){const text=input.trim().slice(0,160);if(/^(รายการยืม|loans)$/i.test(text))return {type:'LOANS' as const,value:''};const status=text.match(/^(?:สถานะ|status)\s+(AST-\d{6,})$/i);if(status)return {type:'STATUS' as const,value:status[1].toUpperCase()};const search=text.match(/^(?:ค้นหา|search)\s+(.{1,80})$/i);if(search)return {type:'SEARCH' as const,value:search[1]};return {type:'HELP' as const,value:''};}
+function commandFromText(input:string){const text=input.trim().slice(0,160);if(/^(รายการยืม|loans)$/i.test(text))return {type:'LOANS' as const,value:''};const status=text.match(/^(?:(?:สถานะ|status)\s+)?(AST-\d{6,})$/i);if(status)return {type:'STATUS' as const,value:status[1].toUpperCase()};const search=text.match(/^(?:ค้นหา|search)\s+(.{1,80})$/i);if(search)return {type:'SEARCH' as const,value:search[1]};return {type:'HELP' as const,value:''};}
 async function lineNaturalCommand(text:string){
  const key=process.env.OPENAI_API_KEY;if(!key)return commandFromText(text);
  if(commandFromText(text).type!=='HELP')return commandFromText(text);
@@ -36,7 +36,7 @@ async function lineAnswer(command:{type:'LOANS'|'STATUS'|'SEARCH'|'HELP';value:s
  if(command.type==='STATUS'){const r=await pool.query('SELECT display_id,name,status,location,available_qty,total_qty FROM inventory WHERE display_id=$1 AND deleted_at IS NULL',[command.value]);if(!r.rowCount)return 'ไม่พบ Asset ID นี้';const a=r.rows[0];return [a.display_id,a.name,'Status: '+a.status,'Location: '+a.location,'Available: '+a.available_qty+'/'+a.total_qty].join('\n');}
  if(command.type==='SEARCH'){const term=command.value.slice(0,80).replace(/[\\%_]/g,'\\$&');const r=await pool.query("SELECT display_id,name,status,location FROM inventory WHERE deleted_at IS NULL AND (display_id ILIKE $1 ESCAPE '\\' OR name ILIKE $1 ESCAPE '\\' OR serial ILIKE $1 ESCAPE '\\') ORDER BY display_id LIMIT 5",['%'+term+'%']);return r.rowCount?r.rows.map(a=>[a.display_id,a.name,a.status,a.location].join(' / ')).join('\n'):'ไม่พบอุปกรณ์ที่ค้นหา';}
  if(command.type==='LOANS'){const r=await pool.query('SELECT i.display_id,l.borrower_name,l.expected_return_at FROM loans l JOIN inventory i ON i.id=l.inventory_id WHERE l.closed_at IS NULL ORDER BY l.borrowed_at DESC LIMIT 5');return r.rowCount?r.rows.map(a=>a.display_id+' / '+a.borrower_name+' / '+(a.expected_return_at?new Date(a.expected_return_at).toISOString().slice(0,10):'ไม่กำหนดคืน')).join('\n'):'ไม่มีรายการยืมค้าง';}
- return 'คำสั่ง: สถานะ AST-000001, ค้นหา <ชื่อหรือ Serial>, รายการยืม\nAI ตอบคำถามเพิ่มเติมได้เมื่อตั้งค่า OpenAI API Key';
+ return 'คำสั่ง: AST-000001 (หรือ สถานะ AST-000001), ค้นหา <ชื่อหรือ Serial>, รายการยืม\nAI ตอบคำถามเพิ่มเติมได้เมื่อตั้งค่า OpenAI API Key';
 }
 app.post('/api/v1/integrations/line/webhook',express.raw({type:'application/json',limit:'64kb'}),async(req,res)=>{
  try{

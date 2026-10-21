@@ -20,17 +20,19 @@ if(config.TRUST_PROXY==='true') app.set('trust proxy',1);
 app.disable('x-powered-by');app.use(helmet());
 
 type LineEvent={type?:string;replyToken?:string;source?:{userId?:string};message?:{type?:string;text?:string}};
-function commandFromText(input:string){const text=input.trim().slice(0,160);if(/^(รายการยืม|loans)$/i.test(text))return {type:'LOANS' as const,value:''};const status=text.match(/^(?:(?:สถานะ|status)\s+)?(AST-\d{6,})$/i);if(status)return {type:'STATUS' as const,value:status[1].toUpperCase()};const search=text.match(/^(?:ค้นหา|search)\s+(.{1,80})$/i);if(search)return {type:'SEARCH' as const,value:search[1]};return {type:'HELP' as const,value:''};}
+function commandFromText(input:string){const text=input.trim().slice(0,160);if(/^(รายการยืม|loans)$/i.test(text))return {type:'LOANS' as const,value:''};const status=text.match(/^(?:(?:สถานะ|status)\s+)?(AST-\d{6,})$/i);if(status)return {type:'STATUS' as const,value:status[1].toUpperCase()};const search=text.match(/^(?:ช่วย\s*)?(?:ค้นหา|search)\s+(.{1,80})$/i);if(search){const term=search[1].replace(/\s*(?:ให้(?:ที|หน่อย)?|หน่อย|ที)\s*$/,'').trim();if(term)return {type:'SEARCH' as const,value:term};}return {type:'HELP' as const,value:''};}
 async function lineNaturalCommand(text:string){
  const key=process.env.OPENAI_API_KEY;if(!key)return commandFromText(text);
  if(commandFromText(text).type!=='HELP')return commandFromText(text);
  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),8000);
  try{
   const response=await fetch('https://api.openai.com/v1/chat/completions',{method:'POST',signal:controller.signal,headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({model:process.env.OPENAI_MODEL||'gpt-4.1-mini',temperature:0,max_tokens:80,messages:[{role:'system',content:'Classify an IT inventory question. Output exactly one of: LOANS, STATUS AST-000001, SEARCH followed by a search phrase (max 80 characters), HELP. No other output. Never create, edit, borrow or return data.'},{role:'user',content:text.slice(0,200)}]})});
-  if(!response.ok)return {type:'HELP' as const,value:''};
+  if(!response.ok){console.error('LINE AI request failed',response.status);return {type:'HELP' as const,value:''};}
   const result=await response.json() as {choices?:{message?:{content?:string}}[]};const output=result.choices?.[0]?.message?.content?.trim()||'';
-  return commandFromText(output);
- }catch{return {type:'HELP' as const,value:''};}finally{clearTimeout(timer);}
+  const interpreted=commandFromText(output);
+  if(interpreted.type==='HELP')console.error('LINE AI unrecognized classification');
+  return interpreted;
+ }catch(e){console.error('LINE AI request error',e instanceof Error?e.name:'unknown');return {type:'HELP' as const,value:''};}finally{clearTimeout(timer);}
 }
 async function lineAnswer(command:{type:'LOANS'|'STATUS'|'SEARCH'|'HELP';value:string}){
  if(command.type==='STATUS'){const r=await pool.query('SELECT display_id,name,status,location,available_qty,total_qty FROM inventory WHERE display_id=$1 AND deleted_at IS NULL',[command.value]);if(!r.rowCount)return 'ไม่พบ Asset ID นี้';const a=r.rows[0];return [a.display_id,a.name,'Status: '+a.status,'Location: '+a.location,'Available: '+a.available_qty+'/'+a.total_qty].join('\n');}

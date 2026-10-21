@@ -4,7 +4,7 @@ import argon2 from 'argon2';
 import {randomUUID} from 'node:crypto';
 const username=process.env.BOOTSTRAP_ADMIN_USERNAME;
 const password=process.env.BOOTSTRAP_ADMIN_PASSWORD;
-if(!process.env.DATABASE_URL||!username||!password||password.length<16)throw new Error('Set DATABASE_URL, BOOTSTRAP_ADMIN_USERNAME, BOOTSTRAP_ADMIN_PASSWORD (minimum 16 characters).');
+if(!process.env.DATABASE_URL||!username||!password||password.length<8)throw new Error('Set DATABASE_URL, BOOTSTRAP_ADMIN_USERNAME, BOOTSTRAP_ADMIN_PASSWORD (minimum 8 characters).');
 const pool=new Pool({connectionString:process.env.DATABASE_URL});
 try{
  const existing=await pool.query('SELECT 1 FROM app_users LIMIT 1');

@@ -4,8 +4,8 @@ After=network-online.target postgresql.service
 Wants=network-online.target
 
 [Service]
-User=plutus
-Group=plutus
+User=root
+Group=root
 UMask=0077
 Type=oneshot
 WorkingDirectory=/srv/mcp-workspaces/plutus

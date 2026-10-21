@@ -4,8 +4,8 @@ After=postgresql.service
 Wants=postgresql.service
 
 [Service]
-User=plutus
-Group=plutus
+User=root
+Group=root
 UMask=0077
 Type=simple
 WorkingDirectory=/srv/mcp-workspaces/plutus

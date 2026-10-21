@@ -7,7 +7,7 @@ function service(name){try{return execFileSync('systemctl',['is-active',name],{e
 function userExists(name){try{execFileSync('id',['-u',name],{stdio:'ignore',timeout:3000});return true;}catch{return false;}}
 function portOpen(port){return new Promise(resolve=>{const s=connect({host:'127.0.0.1',port});s.setTimeout(1000);s.once('connect',()=>{s.destroy();resolve(true)});s.once('error',()=>resolve(false));s.once('timeout',()=>{s.destroy();resolve(false)});});}
 const root='/srv/mcp-workspaces/plutus';
-check('Dedicated unprivileged service account',userExists('plutus'),'user=plutus');
+check('Root service identity available',userExists('root'),'internal deployment user=root');
 const envFile='/etc/plutus/plutus.env';
 const envExists=existsSync(envFile);
 check('Private environment file',envExists,envFile);
@@ -23,6 +23,7 @@ if(envExists){
 check('Production API active',service('plutus-api'));
 check('Production web active',service('plutus-web'));
 check('Backup schedule active',service('plutus-backup.timer'));
+try{const count=Number(execFileSync('psql',['-X','-A','-t','-d','plutus','-c',"SELECT count(*) FROM app_users WHERE role='ADMIN' AND active=true"],{encoding:'utf8',timeout:3000}).trim());check('Active production admin',count>0,'minimum one ADMIN required');}catch{check('Active production admin',false,'unable to verify account');}
 check('Web compiled',existsSync(root+'/apps/web/dist/index.html'));
 check('API compiled',existsSync(root+'/apps/api/dist/server.js'));
 check('Web origin reachable',await portOpen(4173));

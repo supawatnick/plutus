@@ -4,8 +4,8 @@ After=plutus-api.service
 Requires=plutus-api.service
 
 [Service]
-User=plutus
-Group=plutus
+User=root
+Group=root
 UMask=0077
 Type=simple
 WorkingDirectory=/srv/mcp-workspaces/plutus

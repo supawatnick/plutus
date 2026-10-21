@@ -16,7 +16,7 @@
 - Run `npm run ops:preflight` for a non-mutating readiness check. On 2026-10-21, the production service account, private environment file, active API/Web services and loopback ports remained unavailable; backup timer was active.
 
 ## Still BLOCKING production acceptance
-1. Production service is **not deployed**; credentials, initial administrator and LAN/HTTPS smoke tests remain unverified.
+1. Production API/Web services have been deployed on root-run loopback ports 3001/4173; HTTPS public hostname returned HTTP 200 and unauthenticated API returned 401. Initial Admin was created. **Human authenticated UAT, backup restore and operational acceptance remain outstanding.**
 2. LINE/Email delivery is deferred/optional and not a Phase 04 blocker. Delivery to real providers remains unverified and must not be represented as active.
 3. Off-host encrypted backup, alerting and restore drills for the chosen operational environment are not verified.
 4. Production UAT and final security review/sign-off remain outstanding.

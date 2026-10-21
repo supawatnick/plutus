@@ -14,7 +14,7 @@ Run daily from a dedicated scheduler with access to PostgreSQL credentials. Conf
 
 On 2026-10-15, the script successfully backed up isolated `plutus_test` and restored the archive to a separate `plutus_restore_check` PostgreSQL database. The resulting test database contained 3 assets and 3 loans (both queries succeeded).
 
-Production backup scheduling is configured with `plutus-backup.timer`. On 2026-10-21 the previously failing backup service was fixed; a fresh production backup with checksum was generated and restored successfully into a temporary database. Off-host backup is still outstanding. `npm run ops:preflight` now fails if a backup is older than 36 hours, its checksum sidecar is missing, or SHA-256 verification fails. These checks detect on-host failures but cannot survive loss of this machine.
+Production backup scheduling is configured with `plutus-backup.timer`. On 2026-10-21 the previously failing backup service was fixed; a fresh production backup with checksum was generated and restored successfully into a temporary database. Off-host backup is deferred by owner decision; daily local backups are accepted for the current internal-use phase, with the acknowledged risk of losing both application data and local backups if this server or its disk fails. `npm run ops:preflight` now fails if a backup is older than 36 hours, its checksum sidecar is missing, or SHA-256 verification fails. These checks detect on-host failures but cannot survive loss of this machine.
 
 ## Encrypted off-host replication (prepared; destination not connected)
 

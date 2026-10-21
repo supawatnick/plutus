@@ -12,17 +12,18 @@
 - A loopback-only web origin and API reverse proxy passed real browser→web origin→Express→PostgreSQL E2E on desktop/mobile. Production API/Web systemd units are installed, enabled and active; see `docs/WEB_ORIGIN.md`.
 
 ## Current scope
-- Phase 04 prioritizes Web/Mobile, LAN deployment, security, backup and UAT. LINE chatbot, LINE notifications and optional AI integration are deferred to Phase 05. They do not block Phase 04 acceptance. Email delivery is also optional for Phase 04.
+- Phase 04 core Web/Mobile, LAN and local-backup scope was accepted on 2026-10-21. By owner request, **LINE Chatbot and LINE notifications are reopened under Phase 04** for provider setup, secure credentials, live webhook and message-delivery UAT. AI classification remains optional until an OpenAI API key is supplied; Email and off-host backup remain deferred.
 - Run `npm run ops:preflight` for a non-mutating readiness check. On 2026-10-21 the root-run production service, private environment, API/Web listeners, Admin account, recent backup, and SHA-256 checksum all passed: 17/17. This checks on-host backup health only, not off-host replication.
 
 ## Phase 04 acceptance (local-backup scope approved by owner)
 - **Accepted functional UAT:** Owner confirmed sign-in, user creation, asset creation, checkout/return and password change through the production web app.
 - **Accepted deployment checks:** Active API/Web services on loopback ports 3001/4173, HTTPS public HTTP 200, and `npm run ops:preflight` 17/17 PASS on 2026-10-21.
 - **Accepted local backup:** Scheduled backup, recent archive SHA-256 verification and prior isolated restore drill passed. A disk/server failure can destroy both production data and its local backups.
-- **Deferred, not Phase 04 blockers:** Off-host NFS/AES-256 replication (per owner decision), LINE/Email/AI integration and additional alerting.
+- **Reopened Phase 04 work:** LINE Messaging API credentials, signed webhook live test, LINE account-link UAT, read-only commands and real reminder delivery acknowledgement. On 2026-10-21 both LINE credentials were absent, the unsigned public webhook returned 503 (intentionally disabled) and no notification timer was active.
+- **Deferred:** Off-host NFS/AES-256 replication, Email and optional OpenAI classification.
 - **Ongoing operations:** Monitor daily backup outcome and freshness, rotate initial Admin credentials, and repeat the isolated restore drill periodically. Cloudflare remains owner-managed.
 
-**Phase 04 status: ACCEPTED for the agreed internal-use, local-backup scope.** This is not a claim of off-host disaster recovery or external security certification.
+**Phase 04 status: Core internal-use scope ACCEPTED; LINE integration REOPENED / PENDING credentials and live provider UAT.** This is not a claim of off-host disaster recovery or external security certification.
 
 ## Safety and operational constraints
 - Work only on Plutus `10.10.110.3`, using the `ntap_plutus` connector. Do not modify `ntap-office`.

@@ -3,7 +3,7 @@
 ## LINE Chatbot (protected, read-only)
 1. Create a LINE Messaging API channel under the company's LINE Official Account.
 2. Configure `LINE_CHANNEL_SECRET` and `LINE_CHANNEL_ACCESS_TOKEN` as private server environment secrets (not committed).
-3. Publish the HTTPS webhook `https://<real-domain>/api/v1/integrations/line/webhook` via Cloudflare Tunnel.
+3. Set the Messaging API Webhook URL to `https://plutus.followthesunth.com/api/v1/integrations/line/webhook` and enable **Use webhook** in LINE Developers. The existing Cloudflare Tunnel already serves the route; no new port forward is necessary. Keep `/etc/plutus/plutus.env` mode `0600` and restart `plutus-api` only after credentials are set.
 4. After signing in to Plutus, click **LINK LINE CHATBOT** on the Dashboard. This generates a single-use 16-character code, expiring after 15 minutes.
 5. Send `ผูกบัญชี <code>` (or `link <code>`) to the bot. The webhook checks the LINE signature and only then links the verified LINE user ID to an active Plutus IT account.
 6. Commands: `สถานะ AST-000001`, `ค้นหา Cisco`, `รายการยืม`. These query inventory and open loans without write permissions.
@@ -11,7 +11,9 @@
 8. Users may unlink via authenticated `DELETE /api/v1/integrations/line/account`.
 9. Audit records login/link/search actions. Never place production tokens in Git, browser bundles or test files.
 
-The webhook is inactive without credentials. No LINE messages were sent during local automated tests.
+As checked on 2026-10-21, production has neither `LINE_CHANNEL_SECRET` nor `LINE_CHANNEL_ACCESS_TOKEN`, and the unsigned webhook returns HTTP 503 by design. Do not enable the notification timer or claim live delivery until a signed webhook request, account-link exchange and test push/multicast are verified. The live token must not be pasted in chat or committed to Git. Optional `OPENAI_API_KEY` is not required for fixed LINE commands.
+
+The owner must create/configure the LINE Official Account Messaging API channel, then place the **Channel secret** and **Channel access token** directly in the server-only environment file. After enabling the webhook in LINE Developers, verify it by sending a message from a real LINE account and by linking from the PLUTUS dashboard.
 
 ## Reminders
 `node scripts/queue-reminders.mjs` queues up to two events (borrower EMAIL + IT LINE) for each eligible open loan with an expected return date, at 3 days before return and when overdue. Event keys prevent duplicate queueing.

@@ -18,7 +18,7 @@
 ## Still BLOCKING production acceptance
 1. Production API/Web services have been deployed on root-run loopback ports 3001/4173; HTTPS public hostname returned HTTP 200 and unauthenticated API returned 401. Initial Admin was created. **Human authenticated UAT, backup restore and operational acceptance remain outstanding.**
 2. LINE/Email delivery is deferred/optional and not a Phase 04 blocker. Delivery to real providers remains unverified and must not be represented as active.
-3. Off-host encrypted backup, alerting and restore drills for the chosen operational environment are not verified.
+3. An AES-256 off-host backup replication script is ready and refuses non-mounted targets, but no independent storage mount, passphrase, alert channel or off-host restore drill has been verified. Off-host redundancy remains blocking.
 4. Owner completed core production UAT (asset, user, checkout/return, password); final security and operations sign-off remain outstanding.
 5. Cloudflare Tunnel and public hostname `plutus.followthesunth.com` are managed separately by the owner. Do **not** change Cloudflare, DNS or tunnels as part of application development.
 

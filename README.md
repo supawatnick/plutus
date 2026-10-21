@@ -1,9 +1,39 @@
 # Plutus — IT Inventory & Loan Management
 
-## Installation package (Ubuntu 24.04)
-For fresh installations, see [packaging/INSTALLATION.md](packaging/INSTALLATION.md). After building (`npm run build`), run `bash packaging/build-release.sh` to create a checksum-verified `.tar.gz` release archive. The installer explicitly refuses to overwrite an existing production installation.
-
 Internal company asset inventory and IT-operated checkout/check-in system.
+
+## Quick start — install on a NEW Ubuntu 24.04 server
+
+**Download the ready-made installation bundle** (includes compiled Web/API and installer):
+
+- [plutus-ubuntu24-53ebdb5.tar.gz](releases/plutus-ubuntu24-53ebdb5.tar.gz)
+- [SHA-256 checksum](releases/plutus-ubuntu24-53ebdb5.tar.gz.sha256)
+- [Detailed installation guide](packaging/INSTALLATION.md)
+
+Place both downloaded files together on the new Ubuntu 24.04 server, then run:
+
+```bash
+sha256sum -c plutus-ubuntu24-53ebdb5.tar.gz.sha256
+mkdir plutus-install
+tar -xzf plutus-ubuntu24-53ebdb5.tar.gz -C plutus-install
+cd plutus-install
+sudo bash packaging/install.sh
+```
+
+The installer downloads Node.js 24, PostgreSQL 16 and npm dependencies; sets up the database and migrations; generates a unique first Admin password in a root-only local file; and enables the Web, API and daily local backup services. After a successful install, check:
+
+```bash
+sudo systemctl status plutus-api plutus-web plutus-backup.timer
+curl -f http://127.0.0.1:4173/health
+curl -f http://127.0.0.1:4173/api/v1/health
+sudo cat /root/.plutus/initial-admin-credentials
+```
+
+Sign in as `itadmin` using that generated password and change it after first login. The Web service listens on **127.0.0.1:4173 only**; configure an HTTPS reverse proxy or Cloudflare Tunnel separately for remote access. For HTTPS deployment, provide `PLUTUS_PUBLIC_ORIGIN=https://your-domain.example` when invoking the installer. **Do not use this fresh-install script to update an existing PLUTUS server**: it intentionally refuses overwriting existing services, configuration or database.
+
+No real passwords, database contents, LINE/OpenAI API keys or Cloudflare credentials are included in the installation bundle or committed to this repository. Add optional secrets only to `/etc/plutus/plutus.env` on your own server with mode `0600`. An end-to-end install on a clean VM has not yet been verified; review the [installer limitations](packaging/INSTALLATION.md) before production use.
+
+To rebuild an install package from source, run `npm ci && npm run build && bash packaging/build-release.sh`. The bundled release above corresponds to commit `53ebdb5`.
 
 ## Confirmed product rules
 - Asset form: asset name, serial number (optional), status, location. IDs assigned automatically as AST-000001 etc.

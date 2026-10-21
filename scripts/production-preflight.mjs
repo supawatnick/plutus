@@ -1,4 +1,4 @@
-import {existsSync,statSync,readFileSync} from 'node:fs';
+import {existsSync,statSync,readFileSync,readdirSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {connect} from 'node:net';
 const checks=[];
@@ -23,6 +23,17 @@ if(envExists){
 check('Production API active',service('plutus-api'));
 check('Production web active',service('plutus-web'));
 check('Backup schedule active',service('plutus-backup.timer'));
+const backupDir='/var/backups/plutus';
+try{
+ const backups=readdirSync(backupDir).filter(f=>/^plutus-\d{8}T\d{6}Z\.dump$/.test(f)).map(f=>({file:f,mtime:statSync(backupDir+'/'+f).mtimeMs})).sort((a,b)=>b.mtime-a.mtime);
+ const latest=backups[0];const fresh=Boolean(latest&&Date.now()-latest.mtime<=36*3600000&&Date.now()>=latest.mtime);
+ check('Fresh backup within 36 hours',fresh,latest?latest.file:'no backup found');
+ check('Backup checksum present',Boolean(latest&&existsSync(backupDir+'/'+latest.file+'.sha256')));
+ if(latest&&fresh&&existsSync(backupDir+'/'+latest.file+'.sha256')){
+  try{execFileSync('sha256sum',['-c',latest.file+'.sha256'],{cwd:backupDir,stdio:'ignore',timeout:10000});check('Backup checksum valid',true);}catch{check('Backup checksum valid',false);}
+ }
+}catch{check('Fresh backup within 36 hours',false,'backup directory unreadable');}
+
 try{const count=Number(execFileSync('psql',['-X','-A','-t','-d','plutus','-c',"SELECT count(*) FROM app_users WHERE role='ADMIN' AND active=true"],{encoding:'utf8',timeout:3000}).trim());check('Active production admin',count>0,'minimum one ADMIN required');}catch{check('Active production admin',false,'unable to verify account');}
 check('Web compiled',existsSync(root+'/apps/web/dist/index.html'));
 check('API compiled',existsSync(root+'/apps/api/dist/server.js'));

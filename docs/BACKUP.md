@@ -14,4 +14,4 @@ Run daily from a dedicated scheduler with access to PostgreSQL credentials. Conf
 
 On 2026-10-15, the script successfully backed up isolated `plutus_test` and restored the archive to a separate `plutus_restore_check` PostgreSQL database. The resulting test database contained 3 assets and 3 loans (both queries succeeded).
 
-Production backup scheduling is **not configured yet**.
+Production backup scheduling is configured with `plutus-backup.timer`. On 2026-10-21 the previously failing backup service was fixed; a fresh production backup with checksum was generated and restored successfully into a temporary database. Off-host backup is still outstanding.

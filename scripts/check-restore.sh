@@ -3,7 +3,7 @@ set -Eeuo pipefail
 if [[ $# -ne 1 ]]; then echo "Usage: $0 /absolute/path/to/plutus-YYYYMMDD...dump" >&2;exit 2;fi
 FILE="$1"
 if [[ ! -f "$FILE" || "$FILE" != /* ]]; then echo "Backup file must exist at an absolute path" >&2;exit 2;fi
-sha256sum -c "$FILE.sha256"
+(cd "$(dirname "$FILE")" && sha256sum -c "$(basename "$FILE").sha256")
 temp_db="plutus_restorecheck_$$"
 cleanup() { runuser -u postgres -- dropdb --if-exists "$temp_db" >/dev/null 2>&1 || true; }
 trap cleanup EXIT

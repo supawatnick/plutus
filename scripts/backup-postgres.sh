@@ -15,5 +15,7 @@ pg_restore --list "$tmp" >/dev/null
 mv -- "$tmp" "$path"
 trap - EXIT
 chmod 600 "$path"
+(cd "$BACKUP_DIR" && sha256sum "$(basename "$path")" > "$(basename "$path").sha256")
+chmod 600 "$path.sha256"
 find "$BACKUP_DIR" -maxdepth 1 -type f -name 'plutus-*.dump' -mtime +"$retention" -delete
 printf 'Verified backup archive: %s\n' "$path"

@@ -5,8 +5,8 @@ Wants=postgresql.service
 
 [Service]
 Type=oneshot
-Environment=PLUTUS_BACKUP_DB=plutus
-Environment=PLUTUS_BACKUP_DIR=/var/backups/plutus
-ExecStart=/srv/mcp-workspaces/plutus/scripts/backup-postgres.sh
+Environment=BACKUP_DIR=/var/backups/plutus
+Environment=DATABASE_URL=postgresql://root@localhost/plutus?host=/var/run/postgresql
+ExecStart=/usr/bin/bash /srv/mcp-workspaces/plutus/scripts/backup-postgres.sh
 NoNewPrivileges=true
 PrivateTmp=true

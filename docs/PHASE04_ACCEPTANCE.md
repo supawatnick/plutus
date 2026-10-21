@@ -1,9 +1,9 @@
-# Phase 04 Acceptance — 2026-10-15
+# Phase 04 Acceptance — updated 2026-10-21
 
 ## Verified in isolated test environment
 - Frontend/backend build and TypeScript checks succeeded.
 - Mock Playwright suite: 21 passed, 1 intentionally skipped (desktop-only mobile viewport assertion).
-- Live browser → Express → PostgreSQL (`plutus_test` only): desktop and mobile checkout/return flows passed.
+- Live browser → Express → PostgreSQL (`plutus_test` only): desktop and mobile checkout/return flows passed. On 2026-10-21, added real browser Admin create/deactivate/reactivate account tests and Viewer restricted access tests on both desktop/mobile: 6/6 live tests passed.
 - PostgreSQL API integration passed: auth/RBAC, CSRF Origin rejection, inventory search/pagination, duplicate serials, concurrent stock checkouts, partial returns, isolated loan state, last-admin protection, session revocation and audit.
 - Responsive Admin UI has user creation, role/active changes and latest 100 audit events; backend exclusively grants Admin access.
 - Inventory list now requests 25 records per page from the server, with server search/status filtering.

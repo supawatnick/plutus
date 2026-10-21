@@ -1,0 +1,25 @@
+[Unit]
+Description=PLUTUS Web
+After=plutus-api.service
+Requires=plutus-api.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+UMask=0077
+WorkingDirectory=@TARGET@
+EnvironmentFile=/etc/plutus/plutus.env
+Environment=WEB_HOST=127.0.0.1
+Environment=WEB_PORT=4173
+Environment=API_PORT=3001
+ExecStart=@NODE@ scripts/serve-web.mjs
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

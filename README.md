@@ -1,5 +1,8 @@
 # Plutus — IT Inventory & Loan Management
 
+## Installation package (Ubuntu 24.04)
+For fresh installations, see [packaging/INSTALLATION.md](packaging/INSTALLATION.md). After building (`npm run build`), run `bash packaging/build-release.sh` to create a checksum-verified `.tar.gz` release archive. The installer explicitly refuses to overwrite an existing production installation.
+
 Internal company asset inventory and IT-operated checkout/check-in system.
 
 ## Confirmed product rules

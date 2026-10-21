@@ -1,0 +1,22 @@
+[Unit]
+Description=PLUTUS API
+After=postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+UMask=0077
+WorkingDirectory=@TARGET@
+EnvironmentFile=/etc/plutus/plutus.env
+ExecStart=@NODE@ apps/api/dist/server.js
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

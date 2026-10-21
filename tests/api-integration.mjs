@@ -39,6 +39,9 @@ try{
  const retryImport=await fetch(base+'/imports/inventory/commit',{method:'POST',headers:{cookie},body:makeImport()});assert.equal(retryImport.status,200);assert.equal((await retryImport.json()).imported,0);
  const duplicate=await call('POST','/inventory',{name:'Laptop 2',serial:'unique-serial-test-001',location:'IT Storage',status:'Available'},cookie);assert.equal(duplicate.status,409);
  const inventorySearch=await call('GET','/inventory?search=Switch&limit=1&offset=0',undefined,cookie);assert.equal(inventorySearch.status,200);assert.equal(inventorySearch.data.total,2);assert.equal(inventorySearch.data.items.length,1);
+ const multiTerm=await call('GET','/inventory?search=Switch%20Stock',undefined,cookie);assert.equal(multiTerm.status,200);assert.equal(multiTerm.data.total,1);assert.equal(multiTerm.data.items[0].name,'Switch Stock');
+ const multiTermReversed=await call('GET','/inventory?search=Stock%20Switch',undefined,cookie);assert.equal(multiTermReversed.status,200);assert.equal(multiTermReversed.data.total,1);
+ const wildcardLiteral=await call('GET','/inventory?search=%25',undefined,cookie);assert.equal(wildcardLiteral.status,200);assert.equal(wildcardLiteral.data.total,0);
  const inventoryPageTwo=await call('GET','/inventory?search=Switch&limit=1&offset=1',undefined,cookie);assert.equal(inventoryPageTwo.status,200);assert.equal(inventoryPageTwo.data.items.length,1);assert.notEqual(inventorySearch.data.items[0].id,inventoryPageTwo.data.items[0].id);
  const payload={inventoryId:id,borrowerName:'Test Borrower',borrowerEmail:'test@example.invalid',customerName:'Test Company',customerSite:'Test Site',projectName:'Project 1',quantity:2};
  const [one,two]=await Promise.all([call('POST','/loans',payload,cookie),call('POST','/loans',{...payload,quantity:2},cookie)]);

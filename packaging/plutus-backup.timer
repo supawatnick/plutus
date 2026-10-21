@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily PLUTUS backup at 02:00 Asia/Bangkok
+
+[Timer]
+OnCalendar=*-*-* 02:00:00 Asia/Bangkok
+Persistent=true
+Unit=plutus-backup.service
+
+[Install]
+WantedBy=timers.target

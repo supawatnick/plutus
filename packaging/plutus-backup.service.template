@@ -1,0 +1,13 @@
+[Unit]
+Description=PLUTUS daily PostgreSQL backup
+After=postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+UMask=0077
+Environment=BACKUP_DIR=/var/backups/plutus
+Environment=DATABASE_URL=postgresql://root@localhost/plutus?host=/var/run/postgresql
+ExecStart=/usr/bin/bash @TARGET@/scripts/backup-postgres.sh
+NoNewPrivileges=true
+PrivateTmp=true

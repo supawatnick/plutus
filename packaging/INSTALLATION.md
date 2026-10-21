@@ -1,21 +1,34 @@
-# PLUTUS Ubuntu installation package
+# PLUTUS Ubuntu 24.04 one-command installation
 
-Target: fresh Ubuntu 24.04 installation; Node.js 24+ and PostgreSQL 16+ are prerequisites. The package contains compiled web/API, SQL migrations and systemd service templates. The installer downloads production npm dependencies from the npm registry.
+**Fresh Ubuntu 24.04 only.** This installer downloads/installs PostgreSQL 16, Node.js 24 (official binary SHA-256 verified), npm production dependencies, prepares the local PostgreSQL database, applies schema migrations, creates the first `itadmin` account, installs and starts the API/Web systemd units, and enables daily verified local PostgreSQL backup at 02:00 Asia/Bangkok (30-day retention). It performs HTTP health checks before reporting success.
 
-**Existing production server warning:** do not run this installer on the current PLUTUS host. It refuses to overwrite /etc/plutus/plutus.env, existing service units or the chosen install directory. Production upgrades require a separately tested backup/upgrade procedure.
+## Installation
 
-## Fresh install
+Download and verify the release archive and its `.sha256` file, then run:
 
-1. Install/configure Node.js 24+, PostgreSQL 16+, npm, and a PostgreSQL role/database with only necessary privileges. Provision a TLS-enabled reverse proxy/Cloudflare Tunnel separately. Do not expose Postgres or Express directly to the internet.
-2. Extract the archive on the new server and run `sudo bash packaging/install.sh` from its root directory. Optionally choose a new directory using `PLUTUS_INSTALL_DIR=/opt/plutus`. Installer copies compiled artifacts and installs npm production dependencies but **does not start the app**.
-3. Create `/etc/plutus/plutus.env` from `/etc/plutus/plutus.env.example` and replace every placeholder with real values; set `chmod 600 /etc/plutus/plutus.env`. Ensure PostgreSQL role/database exist; do not use default/example passwords. Do not put secrets in Git.
-4. Apply migrations using `cd /opt/plutus && set -a && source /etc/plutus/plutus.env && set +a && npm run db:migrate`. Only apply to a **new empty database** after taking backups; never point to a production database without a reviewed migration plan.
-5. Bootstrap the first Admin account per `scripts/bootstrap-internal-admin.mjs` (review its usage before running). Rotate credentials after first login.
-6. Start services: `sudo systemctl enable --now plutus-api plutus-web`. Check `curl -f http://127.0.0.1:4173/health` and `curl -f http://127.0.0.1:4173/api/v1/health`.
-7. Configure your own HTTPS tunnel/reverse proxy and daily backups; perform a restore drill. LINE and notification timers are intentionally **not enabled** by this installer.
+```bash
+sha256sum -c plutus-ubuntu24-<commit>.tar.gz.sha256
+mkdir plutus-install && tar -xzf plutus-ubuntu24-<commit>.tar.gz -C plutus-install
+cd plutus-install
+sudo bash packaging/install.sh
+```
 
-## Package contents and trust
+Optional production HTTPS origin: `sudo PLUTUS_PUBLIC_ORIGIN=https://plutus.example.com bash packaging/install.sh`. This sets secure cookies. **The installer does not provision DNS, certificates or Cloudflare Tunnel**; these require domain/account authorization. Without this setting, installation uses localhost HTTP mode, which is unsuitable for remote/public login until configured.
 
-The release archive is assembled from an explicit whitelist: compiled API + Web, `scripts`, `database`, npm lock/package files and `packaging`. It excludes `.env`, tokens, local backup data, `.private`, and Git metadata. Validate the accompanying SHA-256 checksum before extraction. Source code is on GitHub; the installation archive is a deployment artifact, not a Debian .deb package.
+The generated initial username/password are placed in `/root/.plutus/initial-admin-credentials` with root-only file permissions. Review and change the password after first login; never paste credentials into chat or commit them. Private runtime settings are stored in `/etc/plutus/plutus.env` (0600). LINE, OpenAI and Email integrations are deliberately not activated; they need separate credentials and provider verification.
 
-The installer uses root systemd units to match the approved internal deployment architecture. A least-privilege dedicated service account and off-host disaster recovery remain future hardening work.
+The installer **refuses an existing** `/opt/plutus`, `/etc/plutus/plutus.env`, PLUTUS systemd unit, initial admin credentials file, or an existing `plutus` PostgreSQL database. It is NOT an upgrade script. Do not run this installer on the current production host. The package contains no database data or secrets. PostgreSQL uses a local peer-authenticated `root` database role, consistent with this project's current internal/root-run deployment; this is not a least-privilege hardened deployment.
+
+Network prerequisites: outbound HTTPS to Ubuntu apt mirrors, nodejs.org and npm registry. Reverse proxy/Cloudflare Tunnel, firewall policy, DNS and off-host backups are out of scope and require environment-specific setup. The installer has not yet been executed end-to-end on a clean VM; perform a disposable-VM validation before treating it as generally production-ready.
+
+## Checks and operations
+
+```bash
+sudo systemctl status plutus-api plutus-web plutus-backup.timer
+curl -f http://127.0.0.1:4173/health
+curl -f http://127.0.0.1:4173/api/v1/health
+sudo systemctl start plutus-backup.service
+ls -l /var/backups/plutus/
+```
+
+Source and package builder are in the Git repository. Use `bash packaging/build-release.sh` after build to produce the `.tar.gz` and SHA-256 checksum.

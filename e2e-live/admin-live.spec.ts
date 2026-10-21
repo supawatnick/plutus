@@ -19,7 +19,7 @@ test('admin manages IT account through real API and PostgreSQL',async({page},inf
  await expect(page.getByRole('heading',{name:'Audit Trail'})).toBeVisible();
  const name='e2e-'+randomUUID().slice(0,12);
  await page.getByLabel('USERNAME').fill(name);
- await page.getByLabel('TEMPORARY PASSWORD (MINIMUM 16 CHARACTERS)').fill('e2e-fixture-password-only');
+ await page.getByLabel(/TEMPORARY PASSWORD/).fill('e2e-fixture-password-only');
  await page.getByRole('button',{name:'CREATE IT USER'}).click();
  const account=page.locator('.admin-user').filter({hasText:name});
  await expect(account).toBeVisible();

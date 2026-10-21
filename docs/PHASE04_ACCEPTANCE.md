@@ -11,9 +11,13 @@
 - Notification delivery worker and migration 005 tested on isolated PostgreSQL. Unconfigured channels remain PENDING and retry/backoff is asserted with no external send; real provider acknowledgement is still unverified.
 - A loopback-only web origin and API reverse proxy now passes real browser→web origin→Express→PostgreSQL E2E on desktop/mobile. Production systemd units exist as uninstalled templates; see `docs/WEB_ORIGIN.md`.
 
+## Current scope
+- Phase 04 prioritizes Web/Mobile, LAN deployment, security, backup and UAT. LINE chatbot, LINE notifications and optional AI integration are deferred to Phase 05. They do not block Phase 04 acceptance. Email delivery is also optional for Phase 04.
+- Run `npm run ops:preflight` for a non-mutating readiness check. On 2026-10-21, the production service account, private environment file, active API/Web services and loopback ports remained unavailable; backup timer was active.
+
 ## Still BLOCKING production acceptance
 1. Production service is **not deployed**; credentials, initial administrator and LAN/HTTPS smoke tests remain unverified.
-2. Real notification delivery (LINE/Email), provider acknowledgement and retry behavior are not verified; queued events are not sent messages.
+2. LINE/Email delivery is deferred/optional and not a Phase 04 blocker. Delivery to real providers remains unverified and must not be represented as active.
 3. Off-host encrypted backup, alerting and restore drills for the chosen operational environment are not verified.
 4. Production UAT and final security review/sign-off remain outstanding.
 5. Cloudflare Tunnel and public hostname `plutus.followthesunth.com` are managed separately by the owner. Do **not** change Cloudflare, DNS or tunnels as part of application development.

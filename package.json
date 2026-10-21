@@ -15,7 +15,8 @@
     "test:api": "node tests/api-integration.mjs",
     "db:migrate": "node scripts/migrate.mjs",
     "notifications:queue": "node scripts/queue-reminders.mjs",
-    "notifications:deliver": "node scripts/deliver-notifications.mjs"
+    "notifications:deliver": "node scripts/deliver-notifications.mjs",
+    "ops:preflight": "node scripts/production-preflight.mjs"
   },
   "engines": {
     "node": ">=24"

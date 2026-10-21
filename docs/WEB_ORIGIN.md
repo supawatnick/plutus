@@ -20,4 +20,8 @@ This guide prepares the application services only. The owner manages DNS, Cloudf
 6. Validate locally: `curl http://127.0.0.1:4173/health` and `curl http://127.0.0.1:4173/api/v1/health`; test authenticated workflows through HTTPS when Cloudflare is set up.
 7. Keep the notification scheduler disabled until LINE/Email credentials and provider smoke tests pass.
 
+## Read-only deployment readiness gate
+
+Run `npm run ops:preflight` as a pre-deployment check. It makes no system or database changes; it reports service identity, restricted environment file, secure public origin, cookie settings, compiled artifacts, backup timer and the local API/Web listeners. Exit code `2` means the system is **not ready**. On 2026-10-21 the gate reported 3/9 PASS: web/API artifacts and backup timer were ready; the production service account, environment and running services/ports were absent. Set up production secrets out of Git before enabling systemd units. Cloudflare remains owner-managed.
+
 The automated `npm run test:e2e:live` checks the actual web origin proxy, Express API and isolated `plutus_test` PostgreSQL on loopback. It never uses the production database and is not public-domain UAT.
